@@ -1,3 +1,5 @@
+import streamlit as st
+st.title("Q-INTEGRITY – DENSIDADES (DEPLOY OK)")
 
 # =========================================================
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2) ✅ FINAL PRO
