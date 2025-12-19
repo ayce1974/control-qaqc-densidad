@@ -15,7 +15,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------
-# CONFIG
+# CONFIG STREAMLIT (SIEMPRE PRIMERO)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Q-INTEGRITY | Densidades", layout="wide")
 
@@ -34,17 +34,22 @@ DEFAULT_OBS_BAND = 2.0      # banda Observado = A - 2.0 (si O muy bajo se ajusta
 DEFAULT_KEEP_VALUES = False # arranque profesional: NO mantener
 
 # ---------------------------------------------------------
-# ESTILO UI
+# ESTILO UI (FIX LETRAS + CONTRASTE)
 # ---------------------------------------------------------
 st.markdown(
     """
 <style>
+/* Fondo general */
 .stApp { background:#f4f6fb; }
 
-/* Header */
+/* Forzar texto visible (FIX principal letras blancas) */
+* { color: #0f172a !important; }
+label, p, span, div, small, h1, h2, h3, h4, h5, h6 { color:#0f172a !important; }
+[data-testid="stSidebar"] * { color:#e8eef7 !important; } /* sidebar claro */
+
 .qi-topbar{ background: #0f2f4f; padding: 10px 14px; border-radius: 14px; margin-bottom: 12px; }
-.qi-title{ color:#ffffff; font-size:22px; font-weight:900; margin:0; line-height:1.1; }
-.qi-subtitle{ color:#cfe0ee; font-size:13px; margin:0; }
+.qi-title{ color:#ffffff !important; font-size:22px; font-weight:900; margin:0; line-height:1.1; }
+.qi-subtitle{ color:#cfe0ee !important; font-size:13px; margin:0; }
 
 /* Cards */
 .qi-card{ background:#ffffff; border:1px solid #c7d3e4; border-radius:14px; padding:12px 12px; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
@@ -58,7 +63,7 @@ st.markdown(
   box-shadow: 0 1px 0 rgba(0,0,0,0.02);
   margin-bottom: 10px;
 }
-.qi-h3{ font-size:16px; font-weight:900; margin:0 0 8px 0; color:#0f172a; }
+.qi-h3{ font-size:16px; font-weight:900; margin:0 0 8px 0; color:#0f172a !important; }
 
 /* Inputs */
 div[data-baseweb="input"] > div,
@@ -69,7 +74,22 @@ div[data-baseweb="datepicker"] > div{
   border:1px solid #7fa0d2 !important;
   border-radius:12px !important;
 }
-label { font-weight: 900 !important; color:#0f172a !important; }
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+  background: #111827 !important;
+}
+[data-testid="stSidebar"] .qi-card,
+[data-testid="stSidebar"] .qi-navcard{
+  background:#0b1220 !important;
+  border-color:#334155 !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] div{
+  color:#e8eef7 !important;
+}
 
 /* DataFrame */
 div[data-testid="stDataFrame"] div[role="grid"]{
@@ -86,10 +106,10 @@ div[data-testid="stDataFrame"] div[role="gridcell"]{ background: #ffffff !import
 
 /* Chips */
 .qi-chip{ display:inline-block; padding:4px 10px; border-radius:999px; font-weight:900; font-size:12px; margin-right:8px; }
-.qi-green{ background:#e7f6ea; color:#1b5e20; border:1px solid #bfe8c6; }
-.qi-amber{ background:#fff4db; color:#7a4f00; border:1px solid #ffd68a; }
-.qi-red{ background:#fde7ea; color:#8a1c1c; border:1px solid #f6b9c1; }
-.qi-muted{ color:#475569; }
+.qi-green{ background:#e7f6ea; color:#1b5e20 !important; border:1px solid #bfe8c6; }
+.qi-amber{ background:#fff4db; color:#7a4f00 !important; border:1px solid #ffd68a; }
+.qi-red{ background:#fde7ea; color:#8a1c1c !important; border:1px solid #f6b9c1; }
+.qi-muted{ color:#475569 !important; }
 
 /* Buttons */
 button[kind="primary"] { border-radius: 12px !important; font-weight: 900 !important; }
@@ -104,8 +124,8 @@ button { border-radius: 12px !important; font-weight: 800 !important; }
   background:#ffffff;
   margin-bottom:10px;
 }
-.qi-navcard-title{ font-weight:900; color:#0f172a; font-size:14px; }
-.qi-navcard-sub{ font-weight:800; color:#475569; font-size:12px; margin-top:2px; }
+.qi-navcard-title{ font-weight:900; font-size:14px; }
+.qi-navcard-sub{ font-weight:800; font-size:12px; margin-top:2px; }
 .qi-navcard-active{
   border-color:#0f2f4f !important;
   background:#0f2f4f !important;
@@ -139,7 +159,6 @@ with colB:
 # ---------------------------------------------------------
 COLUMNS = [
     "RowKey",  # interno (NO mostrar)
-
     "ID_Registro",
     "Codigo_Proyecto",
     "Proyecto",
@@ -147,7 +166,6 @@ COLUMNS = [
     "N_Control",
     "N_Acta",
     "Fecha_control",
-
     "Sector_Zona",
     "Tramo",
     "Frente_Tramo",
@@ -159,11 +177,9 @@ COLUMNS = [
     "Coordenada_Norte",
     "Coordenada_Este",
     "Cota",
-
     "Operador",
     "Metodo",
     "Profundidad_cm",
-
     "Densidad_Humeda_gcm3",
     "Humedad_medida_pct",
     "Humedad_Optima_pct",
@@ -172,10 +188,8 @@ COLUMNS = [
     "Densidad_Seca_gcm3",
     "DMCS_Proctor_gcm3",
     "pct_Compactacion",
-
     "Umbral_Cumple_pct",
     "Umbral_Observado_pct",
-
     "Estado_QAQC",
     "Observacion",
     "Timestamp",
@@ -189,10 +203,13 @@ def _safe_uuid() -> str:
 
 def ensure_data_file(path: str) -> None:
     if not os.path.exists(path):
-        pd.DataFrame(columns=COLUMNS).to_excel(path, index=False)
+        pd.DataFrame(columns=COLUMNS).to_excel(path, index=False, engine="openpyxl")
 
-# ✅ FIX REAL: evita ValueError por listas de distinto largo
 def ensure_config_file(path: str) -> None:
+    """
+    FIX CRÍTICO: evita ValueError por listas de distinto largo en DataFrame.
+    Crea qintegrity_config.xlsx si no existe.
+    """
     if os.path.exists(path):
         return
 
@@ -211,13 +228,12 @@ def ensure_config_file(path: str) -> None:
         "Tramos":   pad(tramos),
     })
 
-    with pd.ExcelWriter(path, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="Listas")
+    df.to_excel(path, index=False, sheet_name="Listas", engine="openpyxl")
 
 def load_config_lists(path: str) -> Dict[str, List[str]]:
     ensure_config_file(path)
     try:
-        df = pd.read_excel(path, sheet_name="Listas")
+        df = pd.read_excel(path, sheet_name="Listas", engine="openpyxl")
         sectores = df.get("Sectores", pd.Series([], dtype=str)).dropna().astype(str).tolist()
         metodos  = df.get("Metodos",  pd.Series([], dtype=str)).dropna().astype(str).tolist()
         tramos   = df.get("Tramos",   pd.Series([], dtype=str)).dropna().astype(str).tolist()
@@ -241,7 +257,7 @@ def load_lists_from_template(template_path: str) -> Dict:
     if (not template_path) or (not os.path.exists(template_path)):
         return defaults
     try:
-        df_l = pd.read_excel(template_path, sheet_name="Listas")
+        df_l = pd.read_excel(template_path, sheet_name="Listas", engine="openpyxl")
         def pull_any(possible_cols: List[str]) -> List[str]:
             for c in possible_cols:
                 if c in df_l.columns:
@@ -273,7 +289,7 @@ def load_lists_from_template(template_path: str) -> Dict:
         return defaults
 
 def load_data(path: str) -> pd.DataFrame:
-    df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS)
+    df = pd.read_excel(path, engine="openpyxl") if os.path.exists(path) else pd.DataFrame(columns=COLUMNS)
 
     rename_map = {
         "Observación": "Observacion",
@@ -320,7 +336,7 @@ def save_data(df: pd.DataFrame, path: str) -> None:
         if c not in out.columns:
             out[c] = np.nan
     out = out[COLUMNS]
-    out.to_excel(path, index=False)
+    out.to_excel(path, index=False, engine="openpyxl")
 
 def next_id(df: pd.DataFrame) -> int:
     if df.empty or df["ID_Registro"].dropna().empty:
@@ -350,9 +366,9 @@ def kpi_card(label: str, value: str, sub: str = ""):
     st.markdown(
         f"""
         <div class="qi-card">
-            <div style="color:#64748b;font-size:0.90rem;font-weight:900">{label}</div>
-            <div style="color:#0f172a;font-size:2.0rem;font-weight:900;margin-top:4px">{value}</div>
-            <div style="color:#475569;font-size:0.95rem;margin-top:2px">{sub}</div>
+            <div style="color:#64748b !important;font-size:0.90rem;font-weight:900">{label}</div>
+            <div style="color:#0f172a !important;font-size:2.0rem;font-weight:900;margin-top:4px">{value}</div>
+            <div style="color:#475569 !important;font-size:0.95rem;margin-top:2px">{sub}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -544,11 +560,11 @@ st.session_state["UMBRAL_O_RAW"] = float(UMBRAL_O_RAW)
 st.sidebar.markdown(
     f"""
 <div class="qi-card">
-  <div style="font-weight:900;color:#0f172a;margin-bottom:6px">Leyenda A/O/R</div>
+  <div style="font-weight:900;color:#e8eef7 !important;margin-bottom:6px">Leyenda A/O/R</div>
   <span class="qi-chip qi-green">A · CUMPLE</span>
   <span class="qi-chip qi-amber">O · OBSERVADO</span>
   <span class="qi-chip qi-red">R · NO CUMPLE</span>
-  <div class="qi-muted" style="margin-top:8px;font-size:0.95rem">
+  <div style="margin-top:8px;font-size:0.95rem;color:#cbd5e1 !important">
     <b>O auto-ajustado</b> para quedar cerca de A: <br>
     A={float(UMBRAL_A):.1f}% · O(usado)={float(UMBRAL_O):.1f}% <br>
     (banda mínima: A-{DEFAULT_OBS_BAND:.1f}%)
@@ -572,7 +588,7 @@ with st.sidebar.expander("⚙️ Administrar listas (Sectores / Métodos / Tramo
         st.rerun()
 
 # ---------------------------------------------------------
-# MENÚ LATERAL PRO (BOTONES GRANDES)
+# MENÚ LATERAL
 # ---------------------------------------------------------
 st.sidebar.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 st.sidebar.markdown("### 🧭 Navegación")
@@ -619,7 +635,7 @@ if "p1_keep" not in st.session_state:
 # PANTALLA 1
 # ---------------------------------------------------------
 if page == "Pantalla 1 – Ingreso / Eliminar":
-    st.caption("Pantalla 1 · Ingreso + Cálculos + Tabla (Ver) + Eliminación por ID + Export (Base + KPIs)")
+    st.caption("Pantalla 1 · Ingreso + Cálculos + Tabla + Eliminación por ID + Export (Base + KPIs)")
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
     keep_values = st.checkbox(
@@ -694,8 +710,8 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
             dmcs_txt = st.text_input("DMCS Proctor (g/cm³)", value=st.session_state.get("p1_dmcs_txt", ""), placeholder="Ej: 2.200")
 
         observacion = st.text_area("Observación", value=st.session_state.get("p1_obs", ""))
-
         st.markdown("</div>", unsafe_allow_html=True)
+
         st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
         submitted = st.form_submit_button("💾 Guardar registro", type="primary")
 
@@ -746,14 +762,12 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                 nuevo = {
                     "RowKey": _safe_uuid(),
                     "ID_Registro": next_id(df_now),
-
                     "Codigo_Proyecto": codigo_proy,
                     "Proyecto": proyecto,
                     "N_Registro": n_registro,
                     "N_Control": n_control,
                     "N_Acta": n_acta,
                     "Fecha_control": pd.to_datetime(fecha_ctrl),
-
                     "Sector_Zona": sector_final,
                     "Tramo": tramo_final,
                     "Frente_Tramo": frente,
@@ -765,11 +779,9 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                     "Coordenada_Norte": float(coord_n) if coord_n is not None else np.nan,
                     "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
                     "Cota": float(cota) if cota is not None else np.nan,
-
                     "Operador": operador,
                     "Metodo": metodo_final,
                     "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
-
                     "Densidad_Humeda_gcm3": float(dens_h),
                     "Humedad_medida_pct": float(hum_pct),
                     "Humedad_Optima_pct": float(hum_opt),
@@ -778,10 +790,8 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                     "Densidad_Seca_gcm3": float(dens_s),
                     "DMCS_Proctor_gcm3": float(dmcs),
                     "pct_Compactacion": float(pct_comp),
-
                     "Umbral_Cumple_pct": float(UMBRAL_A),
                     "Umbral_Observado_pct": float(UMBRAL_O),
-
                     "Estado_QAQC": estado,
                     "Observacion": str(observacion).strip(),
                     "Timestamp": pd.to_datetime(datetime.now()),
@@ -822,6 +832,7 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                 st.success("Registro guardado correctamente ✅")
                 st.rerun()
 
+    # KPIs rápidos
     dens_h_v = parse_float(st.session_state.get("p1_dh_txt", ""))
     hum_v = parse_float(st.session_state.get("p1_h_txt", ""))
     hopt_v = parse_float(st.session_state.get("p1_hopt_txt", ""))
@@ -854,8 +865,8 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
         st.markdown(
             f"""
             <div class="qi-card">
-                <div style="color:#64748b;font-size:0.90rem;font-weight:900">Estado QA/QC</div>
-                <div style="color:{color};font-size:1.8rem;font-weight:900;margin-top:6px">{estado_v}</div>
+                <div style="color:#64748b !important;font-size:0.90rem;font-weight:900">Estado QA/QC</div>
+                <div style="color:{color} !important;font-size:1.8rem;font-weight:900;margin-top:6px">{estado_v}</div>
                 <div class="qi-muted" style="margin-top:6px">
                     <span class="qi-chip qi-green">A · CUMPLE</span>
                     <span class="qi-chip qi-amber">O · OBSERVADO</span>
@@ -868,6 +879,7 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
+    # Export base completa + KPIs
     df_all = load_data(DATA_FILE)
     df_kpi_all, _ = compute_kpis(df_all)
     xbytes_all = export_excel_bytes(df_all.drop(columns=["RowKey"]), df_kpi_all)
@@ -884,6 +896,7 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
     with e2:
         st.info("Exporta: **Datos (base completa)** + **KPIs** (listo Power BI).")
 
+    # Tabla vista
     st.subheader("Registros (Base de datos) — Ver / Eliminar")
 
     if df_all.empty:
@@ -905,13 +918,7 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
         ids = df_view["ID_Registro"].dropna().astype(int).tolist()
         ids = sorted(list(dict.fromkeys(ids)))
 
-        if "p1_del_ids" not in st.session_state:
-            st.session_state["p1_del_ids"] = []
-
-        st.session_state["p1_del_ids"] = [x for x in st.session_state["p1_del_ids"] if x in ids]
-
-        sel_ids = st.multiselect("Selecciona ID_Registro a eliminar", options=ids, default=st.session_state["p1_del_ids"])
-        st.session_state["p1_del_ids"] = sel_ids
+        sel_ids = st.multiselect("Selecciona ID_Registro a eliminar", options=ids, default=[])
 
         b1, b2 = st.columns([1.4, 2.6])
         with b1:
@@ -921,7 +928,6 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                 else:
                     df_new, n_del = delete_by_ids(df_all, sel_ids)
                     save_data(df_new, DATA_FILE)
-                    st.session_state["p1_del_ids"] = []
                     st.success(f"Eliminados {n_del} registro(s).")
                     st.rerun()
         with b2:
@@ -1124,6 +1130,4 @@ else:
             )
 
         with a3:
-            st.caption("El usuario elimina por **ID_Registro**. Internamente se borra por **RowKey** (seguro).")
-
-
+            st.caption("Eliminación por **ID_Registro** (visible). Export listo para Power BI.")
