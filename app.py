@@ -1,20 +1,6 @@
-import streamlit as st
-st.title("Q-INTEGRITY – DENSIDADES (DEPLOY OK)")
-
 # =========================================================
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2) ✅ FINAL PRO
 # ENTREGABLE ÚNICO (PEGAR COMPLETO EN app.py)
-#
-# CORRECCIONES CLAVE (SIN FALLAS):
-# 1) Arranque limpio: formulario parte en blanco (sin “fantasmas”) y se limpia al guardar.
-# 2) Eliminación REAL: borra por ID_Registro (visible) pero internamente por RowKey (seguro).
-#    - Funciona igual en Pantalla 1 y Pantalla 2.
-# 3) Pantalla 2 limpia por defecto (sin datos “pegados”): exige botón "Aplicar filtros" para mostrar.
-# 4) Tabla con COLOR (bandas + estado A/O/R) usando pandas Styler (cuando Streamlit lo soporta).
-# 5) Umbral O auto-ajustado para no quedar “sueltísimo” bajo A (banda A-2.0 por defecto).
-# 6) Export Excel por pantalla: Datos + KPIs (listo para Power BI).
-# 7) Listas administrables en qintegrity_config.xlsx (Sectores / Métodos / Tramos).
-# 8) Menú lateral PRO: botones grandes (Pantalla 1 / Pantalla 2) + estado activo.
 # =========================================================
 
 import os
@@ -48,7 +34,7 @@ DEFAULT_OBS_BAND = 2.0      # banda Observado = A - 2.0 (si O muy bajo se ajusta
 DEFAULT_KEEP_VALUES = False # arranque profesional: NO mantener
 
 # ---------------------------------------------------------
-# ESTILO UI (inputs + tablas más contrastadas + menú pro)
+# ESTILO UI
 # ---------------------------------------------------------
 st.markdown(
     """
@@ -205,15 +191,28 @@ def ensure_data_file(path: str) -> None:
     if not os.path.exists(path):
         pd.DataFrame(columns=COLUMNS).to_excel(path, index=False)
 
+# ✅ FIX REAL: evita ValueError por listas de distinto largo
 def ensure_config_file(path: str) -> None:
-    if not os.path.exists(path):
-        df = pd.DataFrame({
-            "Sectores": ["Sector 1", "Sector 2", "Bermas", "Subrasante", "Sub-base", "Base", "Carpeta"],
-            "Metodos": ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"],
-            "Tramos":  ["Tramo 1", "Tramo 2", "Km 0+000 a 0+500", "Km 0+500 a 1+000"],
-        })
-        with pd.ExcelWriter(path, engine="openpyxl") as w:
-            df.to_excel(w, index=False, sheet_name="Listas")
+    if os.path.exists(path):
+        return
+
+    sectores = ["Sector 1", "Sector 2", "Bermas", "Subrasante", "Sub-base", "Base", "Carpeta"]
+    metodos  = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
+    tramos   = ["Tramo 1", "Tramo 2", "Km 0+000 a 0+500", "Km 0+500 a 1+000"]
+
+    max_len = max(len(sectores), len(metodos), len(tramos))
+
+    def pad(lst):
+        return lst + [""] * (max_len - len(lst))
+
+    df = pd.DataFrame({
+        "Sectores": pad(sectores),
+        "Metodos":  pad(metodos),
+        "Tramos":   pad(tramos),
+    })
+
+    with pd.ExcelWriter(path, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name="Listas")
 
 def load_config_lists(path: str) -> Dict[str, List[str]]:
     ensure_config_file(path)
@@ -284,7 +283,7 @@ def load_data(path: str) -> pd.DataFrame:
         "Humedad_Óptima_pct": "Humedad_Optima_pct",
         "Humedad Óptima": "Humedad_Optima_pct",
         "Fecha": "Fecha_control",
-        "_RowKey": "RowKey",  # por si viene de versiones viejas
+        "_RowKey": "RowKey",
     }
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
@@ -307,7 +306,6 @@ def load_data(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # RowKey robusto
     df["RowKey"] = df["RowKey"].astype(str)
     needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
@@ -492,10 +490,6 @@ def reset_form():
             del st.session_state[k]
 
 def delete_by_ids(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[pd.DataFrame, int]:
-    """
-    Elimina registros por ID_Registro (visible) mapeando a RowKey (interno).
-    Devuelve (df_nuevo, cantidad_eliminada).
-    """
     if not ids_to_delete:
         return df_all, 0
     ids_float = [float(x) for x in ids_to_delete]
@@ -744,7 +738,7 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                 pct_comp = calc_pct_comp(float(dens_s), float(dmcs))
 
                 delta_h = float(hum_pct) - float(hum_opt)
-                ventana = "OK" if abs(delta_h) <= float(tol_hum_opt) else "OBSERVADO"  # SOLO informativo
+                ventana = "OK" if abs(delta_h) <= float(tol_hum_opt) else "OBSERVADO"
 
                 estado = estado_qaqc(float(pct_comp), float(UMBRAL_A), float(UMBRAL_O))
 
@@ -828,7 +822,6 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
                 st.success("Registro guardado correctamente ✅")
                 st.rerun()
 
-    # KPIs rápidos (solo si hay valores digitados)
     dens_h_v = parse_float(st.session_state.get("p1_dh_txt", ""))
     hum_v = parse_float(st.session_state.get("p1_h_txt", ""))
     hopt_v = parse_float(st.session_state.get("p1_hopt_txt", ""))
@@ -875,7 +868,6 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
-    # Export base completa + KPIs
     df_all = load_data(DATA_FILE)
     df_kpi_all, _ = compute_kpis(df_all)
     xbytes_all = export_excel_bytes(df_all.drop(columns=["RowKey"]), df_kpi_all)
@@ -892,7 +884,6 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
     with e2:
         st.info("Exporta: **Datos (base completa)** + **KPIs** (listo Power BI).")
 
-    # Tabla vista (SIN RowKey)
     st.subheader("Registros (Base de datos) — Ver / Eliminar")
 
     if df_all.empty:
@@ -937,7 +928,7 @@ if page == "Pantalla 1 – Ingreso / Eliminar":
             st.caption("Borrado seguro interno por RowKey, pero el usuario elimina por **ID_Registro** (visible).")
 
 # ---------------------------------------------------------
-# PANTALLA 2 (DASHBOARD) - LIMPIA POR DEFECTO
+# PANTALLA 2
 # ---------------------------------------------------------
 else:
     st.caption("Pantalla 2 · Dashboard KPIs + Gráficos + Control chart + Tabla (Eliminar/Export)")
@@ -984,7 +975,6 @@ else:
         st.info("Pantalla 2 está **limpia** por defecto. Presiona **Aplicar filtros** para cargar KPIs/Gráficos/Tabla.")
         st.stop()
 
-    # Aplicar filtros (con limpieza real)
     df_f = df_all.copy()
     df_f["Fecha_control"] = pd.to_datetime(df_f["Fecha_control"], errors="coerce")
 
@@ -1001,7 +991,6 @@ else:
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
-    # KPIs
     st.subheader("KPIs (Dashboard)")
     df_kpi, k = compute_kpis(df_f)
 
@@ -1019,7 +1008,6 @@ else:
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
-    # Gráficos
     st.subheader("Gráficos (filtrados)")
     g1, g2, g3 = st.columns([1, 1, 2])
 
@@ -1062,7 +1050,6 @@ else:
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
-    # Control chart
     st.subheader("Gráfico de control (por fecha, cada 3 controles)")
     cs = control_series_by_blocks_of_3(df_f)
 
@@ -1089,7 +1076,6 @@ else:
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
-    # Tabla + export + eliminar
     st.subheader("Registros filtrados — Eliminar / Exportar")
 
     if df_f.empty:
@@ -1123,7 +1109,6 @@ else:
                     df_new, n_del = delete_by_ids(df_all, sel_ids)
                     save_data(df_new, DATA_FILE)
                     st.success(f"Eliminados {n_del} registro(s).")
-                    # resetea aplicado para evitar “fantasmas” en pantalla 2
                     st.session_state["P2_APPLIED"] = False
                     st.rerun()
 
@@ -1139,4 +1124,6 @@ else:
             )
 
         with a3:
-            st.caption("El usuario elimina por **ID_Registro**. Internamente se borra seguro por RowKey. Export: **Datos filtrados + KPIs**.")
+            st.caption("El usuario elimina por **ID_Registro**. Internamente se borra por **RowKey** (seguro).")
+
+
