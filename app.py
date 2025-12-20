@@ -3,6 +3,11 @@
 # ✅ DENSIDADES: Pantalla 1 (Ingreso/Editar/Eliminar) + Pantalla 2 (KPIs/Dashboard/Export)
 # ✅ CONTROL PIE (m²): Módulo independiente (Ingreso/Editar/Eliminar + KPIs/Gráficos/Export)
 #
+# ✅ FIX PEDIDO: ELIMINADO COMPLETO EL CAMPO "MÉTODO"
+#   - No aparece en Pantalla 1 ni Pantalla 2
+#   - No se valida, no se guarda, no se edita
+#   - Si existía en tu Excel viejo, se ignora al cargar
+#
 # PEGAR COMPLETO EN app.py
 # =========================================================
 
@@ -25,7 +30,6 @@ st.set_page_config(page_title="Q-INTEGRITY", layout="wide")
 
 # Densidades
 DATA_FILE_DEN = "qintegrity_densidades.xlsx"
-CONFIG_FILE_DEN = "qintegrity_config.xlsx"
 TEMPLATE_FILE_DEN = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (tu plantilla)
 
 # Control PIE (m²) – módulo independiente
@@ -194,6 +198,7 @@ def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
 # =====================  DENSIDADES  ======================
 # =========================================================
 
+# ✅ Método eliminado: no existe "Metodo" en columnas
 COLUMNS_DEN = [
     "RowKey",
     "ID_Registro",
@@ -215,7 +220,6 @@ COLUMNS_DEN = [
     "Coordenada_Este",
     "Cota",
     "Operador",
-    "Metodo",
     "Profundidad_cm",
     "Densidad_Humeda_gcm3",
     "Humedad_medida_pct",
@@ -236,48 +240,13 @@ def ensure_data_file_den(path: str) -> None:
     if not os.path.exists(path):
         pd.DataFrame(columns=COLUMNS_DEN).to_excel(path, index=False, engine="openpyxl")
 
-def ensure_config_file_den(path: str) -> None:
-    if os.path.exists(path):
-        return
-    metodos = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
-    df = pd.DataFrame({"Metodos": metodos})
-    with pd.ExcelWriter(path, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="Listas")
-
-def load_config_lists_den(path: str) -> Dict[str, List[str]]:
-    ensure_config_file_den(path)
-    try:
-        df = pd.read_excel(path, sheet_name="Listas")
-        metodos = df.get("Metodos", pd.Series([], dtype=str)).dropna().astype(str).tolist()
-        metodos = [m.strip() for m in metodos if str(m).strip()]
-        return {"metodos": metodos}
-    except Exception:
-        return {"metodos": ["Cono de Arena", "Densímetro Nuclear"]}
-
-def save_config_lists_den(path: str, metodos: List[str]) -> None:
-    metodos = [m.strip() for m in metodos if str(m).strip()]
-    df = pd.DataFrame({"Metodos": metodos})
-    with pd.ExcelWriter(path, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="Listas")
-
 def load_lists_from_template_den(template_path: str) -> Dict:
-    defaults = {"metodos": [], "umbral_cumple": 92.0, "umbral_obs": 90.0}
+    # mantiene sólo umbrales por si tu plantilla los trae
+    defaults = {"umbral_cumple": 92.0, "umbral_obs": 90.0}
     if (not template_path) or (not os.path.exists(template_path)):
         return defaults
     try:
         df_l = pd.read_excel(template_path, sheet_name="Listas")
-
-        def pull_any(possible_cols: List[str]) -> List[str]:
-            for c in possible_cols:
-                if c in df_l.columns:
-                    vals = df_l[c].dropna().astype(str).tolist()
-                    vals = [v.strip() for v in vals if v.strip()]
-                    if vals:
-                        return vals
-            return []
-
-        metodos = pull_any(["Metodo", "Método", "Metodos", "Métodos", "Columna5"])
-
         umbral_cumple = defaults["umbral_cumple"]
         umbral_obs = defaults["umbral_obs"]
         if "Columna7" in df_l.columns and "Columna8" in df_l.columns:
@@ -293,12 +262,7 @@ def load_lists_from_template_den(template_path: str) -> Dict:
                         umbral_obs = v
                 except Exception:
                     pass
-
-        return {
-            "metodos": metodos,
-            "umbral_cumple": float(umbral_cumple),
-            "umbral_obs": float(umbral_obs),
-        }
+        return {"umbral_cumple": float(umbral_cumple), "umbral_obs": float(umbral_obs)}
     except Exception:
         return defaults
 
@@ -312,7 +276,12 @@ def save_data_den(df: pd.DataFrame, path: str) -> None:
 
 def load_data_den(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_DEN)
-    rename_map = {"Observación": "Observacion", "Método": "Metodo", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
+
+    # Si venía de versiones anteriores, eliminar/ignorar columna "Metodo"
+    if "Metodo" in df.columns:
+        df = df.drop(columns=["Metodo"], errors="ignore")
+
+    rename_map = {"Observación": "Observacion", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
     for c in COLUMNS_DEN:
@@ -447,6 +416,7 @@ def delete_by_ids_den(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[p
     df_new = df_new[~df_new["ID_Registro"].isin(ids_to_delete)].copy()
     return df_new, (before - len(df_new))
 
+# ✅ Método eliminado: fuera de la firma anti-duplicado
 def record_signature_den(d: Dict) -> str:
     parts = [
         str(d.get("Codigo_Proyecto","")).strip(),
@@ -455,7 +425,6 @@ def record_signature_den(d: Dict) -> str:
         str(d.get("Sector_Zona","")).strip(),
         str(d.get("Tramo","")).strip(),
         str(d.get("Operador","")).strip(),
-        str(d.get("Metodo","")).strip(),
         str(d.get("Densidad_Humeda_gcm3","")).strip(),
         str(d.get("Humedad_medida_pct","")).strip(),
         str(d.get("Humedad_Optima_pct","")).strip(),
@@ -528,8 +497,6 @@ def reset_form_den(clear_last_saved: bool = True):
         "den_coord_e_txt": "",
         "den_cota_txt": "",
         "den_operador": "",
-        "den_met_sel": "— Seleccionar —",
-        "den_met_otro": "",
         "den_prof_txt": "",
         "den_obs": "",
         "den_dh_num": 0.0,
@@ -583,10 +550,6 @@ def load_record_into_form_den(row: pd.Series):
     st.session_state["den_operador"] = str(row.get("Operador") or "")
     st.session_state["den_prof_txt"] = "" if pd.isna(row.get("Profundidad_cm")) else str(float(row.get("Profundidad_cm")))
 
-    metodo_val = str(row.get("Metodo") or "").strip()
-    st.session_state["den_met_sel"] = metodo_val if metodo_val else "— Seleccionar —"
-    st.session_state["den_met_otro"] = ""
-
     st.session_state["den_dh_num"] = float(row.get("Densidad_Humeda_gcm3")) if pd.notna(row.get("Densidad_Humeda_gcm3")) else 0.0
     st.session_state["den_h_num"] = float(row.get("Humedad_medida_pct")) if pd.notna(row.get("Humedad_medida_pct")) else 0.0
     st.session_state["den_hopt_num"] = float(row.get("Humedad_Optima_pct")) if pd.notna(row.get("Humedad_Optima_pct")) else 0.0
@@ -595,11 +558,7 @@ def load_record_into_form_den(row: pd.Series):
 
 # INIT DENSIDADES
 ensure_data_file_den(DATA_FILE_DEN)
-ensure_config_file_den(CONFIG_FILE_DEN)
-
 tpl_den = load_lists_from_template_den(TEMPLATE_FILE_DEN)
-cfg_den = load_config_lists_den(CONFIG_FILE_DEN)
-metodos_den = list(dict.fromkeys([*cfg_den.get("metodos", []), *tpl_den.get("metodos", [])])) or ["Cono de Arena", "Densímetro Nuclear"]
 
 # =========================================================
 # ===================  CONTROL PIE (m²)  ===================
@@ -924,14 +883,6 @@ if st.session_state["APP_PAGE"] in ["DEN_P1", "DEN_P2"]:
         unsafe_allow_html=True,
     )
 
-    with st.sidebar.expander("⚙️ Administrar lista (Métodos)", expanded=False):
-        txt_met = st.text_area("Métodos (1 por línea)", value="\n".join(metodos_den), height=160, key="cfg_met_den")
-        if st.button("💾 Guardar lista", use_container_width=True):
-            new_met = [x.strip() for x in txt_met.splitlines() if x.strip()]
-            save_config_lists_den(CONFIG_FILE_DEN, new_met)
-            st.success("Lista guardada.")
-            st.rerun()
-
 # =========================================================
 # ===================  PÁGINAS DENSIDADES  =================
 # =========================================================
@@ -972,7 +923,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             options=[None] + ids_all0,
             index=0,
             key="DEN_EDIT_PICK",
-            help="Selecciona un ID, cárgalo al formulario y luego guarda cambios.",
+            help="Selecciona un ID, cárgalo al formulario y luego guarda cambios (UPDATE real).",
         )
         if edit_id is not None:
             if st.button("✏️ Cargar ID seleccionado", use_container_width=True):
@@ -1026,14 +977,8 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         operador = st.text_input("Operador (DIGITAR)", value=st.session_state.get("den_operador", ""), key="den_operador").strip()
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("den_prof_txt", ""), placeholder="Ej: 20", key="den_prof_txt")
     with c2:
-        met_opts = ["— Seleccionar —", *metodos_den, "Otro (digitar)"]
-        met_sel = st.selectbox("Método", met_opts, index=0, key="den_met_sel")
-        met_otro = ""
-        if met_sel == "Otro (digitar)":
-            met_otro = st.text_input("Método (otro)", value=st.session_state.get("den_met_otro", ""), key="den_met_otro")
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("den_frente", ""), key="den_frente").strip()
-    metodo_final = (met_otro.strip() if met_sel == "Otro (digitar)" else ("" if met_sel == "— Seleccionar —" else met_sel)).strip()
-
+        st.markdown("<div class='qi-card'><b>Método eliminado</b><br>Este módulo ya no pide ni guarda el campo <b>Método</b>.</div>", unsafe_allow_html=True)
     with c3:
         dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("den_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="den_dh_num")
         h_num = st.number_input("Humedad medida (%)", value=float(st.session_state.get("den_h_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="den_h_num")
@@ -1148,8 +1093,6 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             errs.append("⚠️ Falta Operador.")
         if not sector_final:
             errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final:
-            errs.append("⚠️ Falta Método.")
 
         if dens_h_v is None:
             errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
@@ -1207,7 +1150,6 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -1283,8 +1225,6 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             errs.append("⚠️ Falta Operador.")
         if not sector_final:
             errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final:
-            errs.append("⚠️ Falta Método.")
 
         if dens_h_v is None:
             errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
@@ -1337,7 +1277,6 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
