@@ -1,12 +1,13 @@
 # =========================================================
-# Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2) ✅ FIX FINAL
+# Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2) ✅ FINAL
 # ENTREGABLE ÚNICO (PEGAR COMPLETO EN app.py)
 #
-# FIX NUEVO:
-# - La tabla "no se ve" porque el texto queda BLANCO en el cuerpo del dataframe
-#   (tema/CSS de Streamlit + Styler).
-# - Solución: forzar color de texto NEGRO en gridcells + headers
-#   y en Styler (filas A/O/R).
+# ✅ CAMBIO OBLIGATORIO:
+# - ELIMINADO CAMPO "Método" DE TODOS LADOS:
+#   * Programa (Pantalla 1 y Pantalla 2)
+#   * Validaciones
+#   * Firma anti-duplicado
+#   * Base de datos / Excel (migración automática: borra columna Metodo y re-graba)
 # =========================================================
 
 import os
@@ -27,8 +28,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Q-INTEGRITY | Densidades", layout="wide")
 
 DATA_FILE = "qintegrity_densidades.xlsx"
-CONFIG_FILE = "qintegrity_config.xlsx"
-TEMPLATE_FILE = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional
+TEMPLATE_FILE = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (solo para futuro)
 
 FIG_W = 3.2
 FIG_H = 2.2
@@ -88,8 +88,6 @@ div[data-testid="stDataFrame"] div[role="grid"]{
   border: 2px solid #aabbd6 !important;
   border-radius: 12px !important;
 }
-
-/* ✅ FIX: encabezado y celdas con TEXTO NEGRO */
 div[data-testid="stDataFrame"] div[role="columnheader"]{
   background: #dfe8f7 !important;
   font-weight: 900 !important;
@@ -100,8 +98,6 @@ div[data-testid="stDataFrame"] div[role="gridcell"]{
   color:#0f172a !important;
   font-weight: 700 !important;
 }
-
-/* ✅ FIX: algunos temas meten color en spans internos */
 div[data-testid="stDataFrame"] div[role="gridcell"] *{
   color:#0f172a !important;
 }
@@ -143,7 +139,7 @@ with colB:
     )
 
 # ---------------------------------------------------------
-# COLUMNAS BD
+# COLUMNAS BD (✅ SIN "Metodo")
 # ---------------------------------------------------------
 COLUMNS = [
     "RowKey",
@@ -166,7 +162,6 @@ COLUMNS = [
     "Coordenada_Este",
     "Cota",
     "Operador",
-    "Metodo",
     "Profundidad_cm",
     "Densidad_Humeda_gcm3",
     "Humedad_medida_pct",
@@ -193,81 +188,33 @@ def ensure_data_file(path: str) -> None:
     if not os.path.exists(path):
         pd.DataFrame(columns=COLUMNS).to_excel(path, index=False, engine="openpyxl")
 
-def ensure_config_file(path: str) -> None:
-    if os.path.exists(path):
-        return
-    metodos = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
-    df = pd.DataFrame({"Metodos": metodos})
-    with pd.ExcelWriter(path, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="Listas")
-
-def load_config_lists(path: str) -> Dict[str, List[str]]:
-    ensure_config_file(path)
-    try:
-        df = pd.read_excel(path, sheet_name="Listas")
-        metodos = df.get("Metodos", pd.Series([], dtype=str)).dropna().astype(str).tolist()
-        metodos = [m.strip() for m in metodos if str(m).strip()]
-        return {"metodos": metodos}
-    except Exception:
-        return {"metodos": ["Cono de Arena", "Densímetro Nuclear"]}
-
-def save_config_lists(path: str, metodos: List[str]) -> None:
-    metodos = [m.strip() for m in metodos if str(m).strip()]
-    df = pd.DataFrame({"Metodos": metodos})
-    with pd.ExcelWriter(path, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="Listas")
-
-def load_lists_from_template(template_path: str) -> Dict:
-    defaults = {"metodos": [], "umbral_cumple": 92.0, "umbral_obs": 90.0}
-    if (not template_path) or (not os.path.exists(template_path)):
-        return defaults
-    try:
-        df_l = pd.read_excel(template_path, sheet_name="Listas")
-
-        def pull_any(possible_cols: List[str]) -> List[str]:
-            for c in possible_cols:
-                if c in df_l.columns:
-                    vals = df_l[c].dropna().astype(str).tolist()
-                    vals = [v.strip() for v in vals if v.strip()]
-                    if vals:
-                        return vals
-            return []
-
-        metodos = pull_any(["Metodo", "Método", "Metodos", "Métodos", "Columna5"])
-
-        umbral_cumple = defaults["umbral_cumple"]
-        umbral_obs = defaults["umbral_obs"]
-        if "Columna7" in df_l.columns and "Columna8" in df_l.columns:
-            params = pd.DataFrame({"k": df_l["Columna7"], "v": df_l["Columna8"]}).dropna()
-            params["k"] = params["k"].astype(str).str.strip()
-            for _, r in params.iterrows():
-                try:
-                    k = str(r["k"]); v = float(r["v"])
-                    if "Umbral_A" in k or "UMBRAL_A" in k: umbral_cumple = v
-                    if "Umbral_O" in k or "UMBRAL_O" in k: umbral_obs = v
-                except Exception:
-                    pass
-
-        return {"metodos": metodos, "umbral_cumple": float(umbral_cumple), "umbral_obs": float(umbral_obs)}
-    except Exception:
-        return defaults
-
 def save_data(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
     for c in COLUMNS:
         if c not in out.columns:
             out[c] = np.nan
+    # ✅ eliminar cualquier columna vieja (ej: Metodo) y dejar solo COLUMNS
     out = out[COLUMNS]
     out.to_excel(path, index=False, engine="openpyxl")
 
 def load_data(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS)
-    rename_map = {"Observación": "Observacion", "Método": "Metodo", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
+
+    # normalización nombres
+    rename_map = {"Observación": "Observacion", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
+
+    # ✅ migración: si existe columna Metodo, se elimina y se re-graba
+    had_metodo = "Metodo" in df.columns or "Método" in df.columns
+    if "Método" in df.columns and "Metodo" not in df.columns:
+        df.rename(columns={"Método": "Metodo"}, inplace=True)
+    if "Metodo" in df.columns:
+        df.drop(columns=["Metodo"], inplace=True)
 
     for c in COLUMNS:
         if c not in df.columns:
             df[c] = np.nan
+
     df = df[COLUMNS].copy()
 
     df["ID_Registro"] = pd.to_numeric(df["ID_Registro"], errors="coerce")
@@ -288,10 +235,13 @@ def load_data(path: str) -> pd.DataFrame:
     needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
         df.loc[needs_key, "RowKey"] = [_safe_uuid() for _ in range(int(needs_key.sum()))]
-        save_data(df, path)
 
     if df["ID_Registro"].notna().any():
         df.loc[df["ID_Registro"].notna(), "ID_Registro"] = df.loc[df["ID_Registro"].notna(), "ID_Registro"].astype(int)
+
+    # ✅ si migró (tenía Metodo antes), re-graba ya limpio
+    if had_metodo:
+        save_data(df, path)
 
     return df
 
@@ -411,7 +361,6 @@ def is_invalid_number_if_filled(label: str, raw: str) -> Optional[str]:
         return f"⚠️ {label}: debe ser NUMÉRICO (no letras)."
     return None
 
-# ✅ FIX: Styler con texto NEGRO siempre
 def style_table(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     def row_style(row):
         stt = str(row.get("Estado_QAQC", "")).upper().strip()
@@ -445,7 +394,7 @@ def get_last_saved() -> Optional[Dict]:
     return d if isinstance(d, dict) else None
 
 # ---------------------------------------------------------
-# ✅ RESET SEGURO EN 2 PASOS
+# ✅ RESET SEGURO EN 2 PASOS (SIN Método)
 # ---------------------------------------------------------
 FORM_KEYS_DEFAULTS: Dict[str, object] = {
     "p1_fecha_ctrl": date.today(),
@@ -466,8 +415,6 @@ FORM_KEYS_DEFAULTS: Dict[str, object] = {
     "p1_coord_e_txt": "",
     "p1_cota_txt": "",
     "p1_operador": "",
-    "p1_met_sel": "— Seleccionar —",
-    "p1_met_otro": "",
     "p1_prof_txt": "",
     "p1_obs": "",
     "p1_dh_num": 0.0,
@@ -513,6 +460,7 @@ def delete_by_ids(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[pd.Da
     return df_new, (before - len(df_new))
 
 def record_signature(d: Dict) -> str:
+    # ✅ SIN Método
     parts = [
         str(d.get("Codigo_Proyecto","")).strip(),
         str(d.get("Proyecto","")).strip(),
@@ -520,7 +468,6 @@ def record_signature(d: Dict) -> str:
         str(d.get("Sector_Zona","")).strip(),
         str(d.get("Tramo","")).strip(),
         str(d.get("Operador","")).strip(),
-        str(d.get("Metodo","")).strip(),
         str(d.get("Densidad_Humeda_gcm3","")).strip(),
         str(d.get("Humedad_medida_pct","")).strip(),
         str(d.get("Humedad_Optima_pct","")).strip(),
@@ -587,10 +534,6 @@ def load_record_into_form(row: pd.Series):
     st.session_state["p1_operador"] = str(row.get("Operador") or "")
     st.session_state["p1_prof_txt"] = "" if pd.isna(row.get("Profundidad_cm")) else str(float(row.get("Profundidad_cm")))
 
-    metodo_val = str(row.get("Metodo") or "").strip()
-    st.session_state["p1_met_sel"] = metodo_val if metodo_val else "— Seleccionar —"
-    st.session_state["p1_met_otro"] = ""
-
     st.session_state["p1_dh_num"] = float(row.get("Densidad_Humeda_gcm3")) if pd.notna(row.get("Densidad_Humeda_gcm3")) else 0.0
     st.session_state["p1_h_num"] = float(row.get("Humedad_medida_pct")) if pd.notna(row.get("Humedad_medida_pct")) else 0.0
     st.session_state["p1_hopt_num"] = float(row.get("Humedad_Optima_pct")) if pd.notna(row.get("Humedad_Optima_pct")) else 0.0
@@ -614,12 +557,6 @@ def apply_update_by_rowkey(df: pd.DataFrame, rowkey: str, new_values: Dict) -> T
 # INIT
 # ---------------------------------------------------------
 ensure_data_file(DATA_FILE)
-ensure_config_file(CONFIG_FILE)
-
-tpl = load_lists_from_template(TEMPLATE_FILE)
-cfg = load_config_lists(CONFIG_FILE)
-
-metodos = list(dict.fromkeys([*cfg.get("metodos", []), *tpl.get("metodos", [])])) or ["Cono de Arena", "Densímetro Nuclear"]
 
 # ✅ aplicar reset antes de widgets
 apply_pending_form_reset_if_any()
@@ -637,9 +574,9 @@ tol_hum_opt = st.sidebar.number_input(
 st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
 
 if "UMBRAL_A" not in st.session_state:
-    st.session_state["UMBRAL_A"] = float(tpl.get("umbral_cumple", 92.0) or 92.0)
+    st.session_state["UMBRAL_A"] = 92.0
 if "UMBRAL_O_RAW" not in st.session_state:
-    st.session_state["UMBRAL_O_RAW"] = float(tpl.get("umbral_obs", 90.0) or 90.0)
+    st.session_state["UMBRAL_O_RAW"] = 90.0
 
 UMBRAL_A = st.sidebar.number_input("Umbral A (CUMPLE ≥ %)", value=float(st.session_state["UMBRAL_A"]), step=0.5, format="%.1f")
 UMBRAL_O_RAW = st.sidebar.number_input("Umbral O (OBSERVADO ≥ %)", value=float(st.session_state["UMBRAL_O_RAW"]), step=0.5, format="%.1f")
@@ -662,14 +599,6 @@ st.sidebar.markdown(
 """,
     unsafe_allow_html=True,
 )
-
-with st.sidebar.expander("⚙️ Administrar lista (Métodos)", expanded=False):
-    txt_met = st.text_area("Métodos (1 por línea)", value="\n".join(metodos), height=160, key="cfg_met")
-    if st.button("💾 Guardar lista", use_container_width=True):
-        new_met = [x.strip() for x in txt_met.splitlines() if x.strip()]
-        save_config_lists(CONFIG_FILE, new_met)
-        st.success("Lista guardada.")
-        st.rerun()
 
 st.sidebar.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 st.sidebar.markdown("### 🧭 Navegación")
@@ -792,14 +721,7 @@ if st.session_state["PAGE"] == "P1":
         operador = st.text_input("Operador (DIGITAR)", value=st.session_state.get("p1_operador", ""), key="p1_operador").strip()
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("p1_prof_txt", ""), placeholder="Ej: 20", key="p1_prof_txt")
     with c2:
-        met_opts = ["— Seleccionar —", *metodos, "Otro (digitar)"]
-        met_sel = st.selectbox("Método", met_opts, index=0, key="p1_met_sel")
-        met_otro = ""
-        if met_sel == "Otro (digitar)":
-            met_otro = st.text_input("Método (otro)", value=st.session_state.get("p1_met_otro", ""), key="p1_met_otro")
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("p1_frente", ""), key="p1_frente").strip()
-    metodo_final = (met_otro.strip() if met_sel == "Otro (digitar)" else ("" if met_sel == "— Seleccionar —" else met_sel)).strip()
-
     with c3:
         dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("p1_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="p1_dh_num")
         h_num  = st.number_input("Humedad medida (%)", value=float(st.session_state.get("p1_h_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="p1_h_num")
@@ -811,7 +733,7 @@ if st.session_state["PAGE"] == "P1":
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ==============================
-    # CALC (LIVE) + FALLBACK A ÚLTIMO GUARDADO
+    # CALC (LIVE) + FALLBACK ÚLTIMO GUARDADO
     # ==============================
     dens_h_v = float(dh_num) if float(dh_num) > 0 else None
     hum_v    = float(h_num) if float(h_num) > 0 else None
@@ -907,7 +829,6 @@ if st.session_state["PAGE"] == "P1":
         if not proyecto:   errs.append("⚠️ Falta Proyecto.")
         if not operador:   errs.append("⚠️ Falta Operador.")
         if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final: errs.append("⚠️ Falta Método.")
 
         if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
         if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
@@ -959,7 +880,6 @@ if st.session_state["PAGE"] == "P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -1033,7 +953,6 @@ if st.session_state["PAGE"] == "P1":
         if not proyecto:   errs.append("⚠️ Falta Proyecto.")
         if not operador:   errs.append("⚠️ Falta Operador.")
         if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final: errs.append("⚠️ Falta Método.")
 
         if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
         if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
@@ -1080,7 +999,6 @@ if st.session_state["PAGE"] == "P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -1379,7 +1297,8 @@ else:
 
         with a3:
             export_df = df_f.drop(columns=["RowKey"]).copy()
-            xbytes = export_excel_bytes(export_df, df_kpi)
+            df_kpi_export, _ = compute_kpis(df_f)
+            xbytes = export_excel_bytes(export_df, df_kpi_export)
             st.download_button(
                 "⬇️ Exportar Excel (Filtrado + KPIs)",
                 data=xbytes,
