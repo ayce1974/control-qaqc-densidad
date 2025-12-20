@@ -3,11 +3,11 @@
 # ✅ DENSIDADES: Pantalla 1 (Ingreso/Editar/Eliminar) + Pantalla 2 (KPIs/Dashboard/Export)
 # ✅ CONTROL PIE (m²): Módulo independiente (Ingreso/Editar/Eliminar + KPIs/Gráficos/Export)
 #
-# ✅ FIX WEB + REGLA DE ORO:
-# 1) ELIMINADO campo "Metodo" COMPLETO (UI + Excel + config + validación + firma)
-# 2) Compatibilidad: si tu Excel antiguo trae columna "Metodo", se ignora sin caer
-# 3) Inicialización robusta de session_state (no valores “fantasma” al entrar)
-# 4) Evita crashes por valores no válidos en selectbox (ya no existe en densidades)
+# ✅ FIX URGENTE (STREAMLIT REVIENTA AL LIMPIAR / GUARDAR):
+# - Streamlit NO permite cambiar st.session_state["key"] de un widget DESPUÉS de que el widget fue creado
+# - Solución: usar "flags" y hacer el reset ANTES de crear widgets (en el siguiente rerun)
+#
+# ✅ Metodo eliminado 100% (UI + Excel + compatibilidad si venía en base antigua)
 #
 # PEGAR COMPLETO EN app.py
 # =========================================================
@@ -31,7 +31,7 @@ st.set_page_config(page_title="Q-INTEGRITY", layout="wide")
 
 # Densidades
 DATA_FILE_DEN = "qintegrity_densidades.xlsx"
-TEMPLATE_FILE_DEN = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (solo para umbrales si existe)
+TEMPLATE_FILE_DEN = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (solo umbrales si existe)
 
 # Control PIE (m²)
 DATA_FILE_PIE = "qintegrity_control_pie_m2.xlsx"
@@ -198,7 +198,6 @@ def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
 # =========================================================
 # =====================  DENSIDADES  ======================
 # =========================================================
-# ✅ "Metodo" ELIMINADO COMPLETO
 COLUMNS_DEN = [
     "RowKey",
     "ID_Registro",
@@ -241,7 +240,6 @@ def ensure_data_file_den(path: str) -> None:
         pd.DataFrame(columns=COLUMNS_DEN).to_excel(path, index=False, engine="openpyxl")
 
 def load_lists_from_template_den(template_path: str) -> Dict:
-    # Solo umbrales (si existe plantilla). Método ya no existe.
     defaults = {"umbral_cumple": 92.0, "umbral_obs": 90.0}
     if (not template_path) or (not os.path.exists(template_path)):
         return defaults
@@ -250,7 +248,6 @@ def load_lists_from_template_den(template_path: str) -> Dict:
         umbral_cumple = defaults["umbral_cumple"]
         umbral_obs = defaults["umbral_obs"]
 
-        # Busca parámetros típicos en columnas 7 y 8 si existen
         if "Columna7" in df_l.columns and "Columna8" in df_l.columns:
             params = pd.DataFrame({"k": df_l["Columna7"], "v": df_l["Columna8"]}).dropna()
             params["k"] = params["k"].astype(str).str.strip()
@@ -271,8 +268,6 @@ def load_lists_from_template_den(template_path: str) -> Dict:
 
 def save_data_den(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
-
-    # Compatibilidad: si viene columna Metodo antigua, se ignora
     if "Metodo" in out.columns:
         out = out.drop(columns=["Metodo"], errors="ignore")
 
@@ -285,17 +280,15 @@ def save_data_den(df: pd.DataFrame, path: str) -> None:
 def load_data_den(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_DEN)
 
-    # Compatibilidad nombres antiguos
     rename_map = {
         "Observación": "Observacion",
         "Fecha": "Fecha_control",
         "_RowKey": "RowKey",
-        "Método": "Metodo",   # si venía antiguo
-        "Metodo": "Metodo",   # si venía antiguo
+        "Método": "Metodo",
+        "Metodo": "Metodo",
     }
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
-    # Si existe Metodo (antiguo), lo eliminamos para que no rompa
     if "Metodo" in df.columns:
         df = df.drop(columns=["Metodo"], errors="ignore")
 
@@ -432,7 +425,6 @@ def delete_by_ids_den(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[p
     return df_new, (before - len(df_new))
 
 def record_signature_den(d: Dict) -> str:
-    # ✅ Metodo eliminado de la firma
     parts = [
         str(d.get("Codigo_Proyecto","")).strip(),
         str(d.get("Proyecto","")).strip(),
@@ -492,7 +484,25 @@ def apply_update_by_rowkey_den(df: pd.DataFrame, rowkey: str, new_values: Dict) 
             d.loc[mask, k] = v
     return d, True
 
-def reset_form_den(clear_last_saved: bool = True):
+# --- reset via FLAG (evita StreamlitAPIException) ---
+DEN_FORM_KEYS = [
+    "den_fecha_ctrl","den_cod_proy","den_proyecto","den_n_reg","den_n_ctrl","den_n_acta",
+    "den_sector_txt","den_tramo_txt","den_frente","den_capa_txt","den_esp_txt",
+    "den_dm_ini_txt","den_dm_ter_txt","den_dm_ctrl_txt","den_coord_n_txt","den_coord_e_txt","den_cota_txt",
+    "den_operador","den_prof_txt","den_obs",
+    "den_dh_num","den_h_num","den_hopt_num","den_dmcs_num",
+    "den_del_ids","DEN_EDIT_ID","DEN_EDIT_ROWKEY","DEN_EDIT_PICK"
+]
+
+def request_reset_den(clear_last_saved: bool = True, clear_edit: bool = True):
+    st.session_state["DEN_RESET_PENDING"] = True
+    st.session_state["DEN_RESET_CLEAR_LAST"] = bool(clear_last_saved)
+    st.session_state["DEN_RESET_CLEAR_EDIT"] = bool(clear_edit)
+
+def apply_reset_den_if_pending():
+    if not st.session_state.get("DEN_RESET_PENDING", False):
+        return
+    # Se ejecuta ANTES de crear widgets (por eso no revienta)
     defaults = {
         "den_fecha_ctrl": date.today(),
         "den_cod_proy": "",
@@ -519,13 +529,21 @@ def reset_form_den(clear_last_saved: bool = True):
         "den_hopt_num": 0.0,
         "den_dmcs_num": 0.0,
         "den_del_ids": [],
-        "DEN_EDIT_ID": None,
-        "DEN_EDIT_ROWKEY": None,
+        "DEN_EDIT_PICK": None,
     }
     for k, v in defaults.items():
         st.session_state[k] = v
-    if clear_last_saved:
+
+    if st.session_state.get("DEN_RESET_CLEAR_EDIT", True):
+        st.session_state["DEN_EDIT_ID"] = None
+        st.session_state["DEN_EDIT_ROWKEY"] = None
+
+    if st.session_state.get("DEN_RESET_CLEAR_LAST", True):
         st.session_state.pop("DEN_LAST_SAVED", None)
+
+    st.session_state["DEN_RESET_PENDING"] = False
+    st.session_state["DEN_RESET_CLEAR_LAST"] = False
+    st.session_state["DEN_RESET_CLEAR_EDIT"] = False
 
 def set_last_saved_den(calc: Optional[Dict]):
     if calc is None:
@@ -570,10 +588,6 @@ def load_record_into_form_den(row: pd.Series):
     st.session_state["den_hopt_num"] = float(row.get("Humedad_Optima_pct")) if pd.notna(row.get("Humedad_Optima_pct")) else 0.0
     st.session_state["den_dmcs_num"] = float(row.get("DMCS_Proctor_gcm3")) if pd.notna(row.get("DMCS_Proctor_gcm3")) else 0.0
     st.session_state["den_obs"] = str(row.get("Observacion") or "")
-
-# INIT DENSIDADES
-ensure_data_file_den(DATA_FILE_DEN)
-tpl_den = load_lists_from_template_den(TEMPLATE_FILE_DEN)
 
 # =========================================================
 # ===================  CONTROL PIE (m²)  ===================
@@ -784,7 +798,19 @@ def compute_kpis_pie(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         "pct_global": pct_global,
     }
 
-def reset_form_pie():
+# --- reset PIE via FLAG ---
+PIE_FORM_KEYS = [
+    "pie_fecha","pie_cod","pie_sector","pie_frente","pie_dm_ini","pie_dm_ter","pie_largo","pie_ancho","pie_valor","pie_ejec",
+    "PIE_EDIT_ID","PIE_EDIT_ROWKEY","PIE_EDIT_PICK","pie_del_ids"
+]
+
+def request_reset_pie(clear_edit: bool = True):
+    st.session_state["PIE_RESET_PENDING"] = True
+    st.session_state["PIE_RESET_CLEAR_EDIT"] = bool(clear_edit)
+
+def apply_reset_pie_if_pending():
+    if not st.session_state.get("PIE_RESET_PENDING", False):
+        return
     defaults = {
         "pie_fecha": date.today(),
         "pie_cod": "",
@@ -796,12 +822,18 @@ def reset_form_pie():
         "pie_ancho": "",
         "pie_valor": "",
         "pie_ejec": "",
-        "PIE_EDIT_ID": None,
-        "PIE_EDIT_ROWKEY": None,
+        "PIE_EDIT_PICK": None,
         "pie_del_ids": [],
     }
     for k, v in defaults.items():
         st.session_state[k] = v
+
+    if st.session_state.get("PIE_RESET_CLEAR_EDIT", True):
+        st.session_state["PIE_EDIT_ID"] = None
+        st.session_state["PIE_EDIT_ROWKEY"] = None
+
+    st.session_state["PIE_RESET_PENDING"] = False
+    st.session_state["PIE_RESET_CLEAR_EDIT"] = False
 
 def load_record_into_form_pie(row: pd.Series):
     st.session_state["PIE_EDIT_ID"] = int(row.get("ID_Registro"))
@@ -820,11 +852,15 @@ def load_record_into_form_pie(row: pd.Series):
     st.session_state["pie_valor"] = "" if pd.isna(row.get("PIE_VALOR")) else str(float(row.get("PIE_VALOR")))
     st.session_state["pie_ejec"] = "" if pd.isna(row.get("Ejecutadas")) else str(float(row.get("Ejecutadas")))
 
-# INIT PIE
+# ---------------------------------------------------------
+# INIT FILES
+# ---------------------------------------------------------
+ensure_data_file_den(DATA_FILE_DEN)
 ensure_data_file_pie(DATA_FILE_PIE)
+tpl_den = load_lists_from_template_den(TEMPLATE_FILE_DEN)
 
 # ---------------------------------------------------------
-# INIT SESSION (evita “fantasmas” en web)
+# INIT SESSION (robusto)
 # ---------------------------------------------------------
 if "APP_PAGE" not in st.session_state:
     st.session_state["APP_PAGE"] = "DEN_P1"
@@ -840,13 +876,18 @@ if "UMBRAL_A" not in st.session_state:
 if "UMBRAL_O_RAW" not in st.session_state:
     st.session_state["UMBRAL_O_RAW"] = float(tpl_den.get("umbral_obs", 90.0) or 90.0)
 
-# Si nunca se inicializó el formulario densidades, lo dejamos limpio
-if "den_fecha_ctrl" not in st.session_state:
-    reset_form_den(clear_last_saved=True)
+# ✅ APLICAR RESETS PENDIENTES (ANTES DE CREAR WIDGETS)
+apply_reset_den_if_pending()
+apply_reset_pie_if_pending()
 
-# Si nunca se inicializó el formulario PIE, lo dejamos limpio
+# Si es primera vez, inicializa FORM de densidades y PIE
+if "den_fecha_ctrl" not in st.session_state:
+    request_reset_den(clear_last_saved=True, clear_edit=True)
+    st.rerun()
+
 if "pie_fecha" not in st.session_state:
-    reset_form_pie()
+    request_reset_pie(clear_edit=True)
+    st.rerun()
 
 # ---------------------------------------------------------
 # SIDEBAR: NAVEGACIÓN
@@ -940,7 +981,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
 
     with topb2:
         if st.button("🧹 LIMPIAR", use_container_width=True):
-            reset_form_den(clear_last_saved=True)
+            request_reset_den(clear_last_saved=True, clear_edit=True)
             st.rerun()
 
     with topb3:
@@ -1220,9 +1261,10 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         })
 
         if not bool(st.session_state.get("den_keep", False)):
-            reset_form_den(clear_last_saved=False)
-            st.session_state["DEN_EDIT_ID"] = None
-            st.session_state["DEN_EDIT_ROWKEY"] = None
+            # ✅ NO tocamos keys de widgets en este run: pedimos reset y rerun
+            request_reset_den(clear_last_saved=False, clear_edit=True)
+            st.success("Registro guardado ✅ (Formulario limpiado)")
+            st.rerun()
 
         st.success("Registro guardado correctamente ✅")
         st.rerun()
@@ -1627,11 +1669,11 @@ else:
     df_all0 = load_data_pie(DATA_FILE_PIE)
     ids_all0 = sorted(df_all0["ID_Registro"].dropna().astype(int).unique().tolist()) if not df_all0.empty else []
 
-    topb1, topb2, topb3 = st.columns([1.1, 3.0, 2.9])
+    topb1, topb2 = st.columns([1.1, 5.9])
 
     with topb1:
         if st.button("🧹 LIMPIAR", use_container_width=True):
-            reset_form_pie()
+            request_reset_pie(clear_edit=True)
             st.rerun()
 
     with topb2:
@@ -1652,14 +1694,6 @@ else:
                     load_record_into_form_pie(row)
                     st.success(f"ID {int(edit_id)} cargado. Modifica y presiona **Guardar cambios**.")
                     st.rerun()
-
-    with topb3:
-        with st.expander("🗑️ Demo (opcional)", expanded=False):
-            if st.button("VACIAR BASE (borra todo)", type="primary", use_container_width=True):
-                save_data_pie(pd.DataFrame(columns=COLUMNS_PIE), DATA_FILE_PIE)
-                reset_form_pie()
-                st.success("Base vaciada.")
-                st.rerun()
 
     # -------- FORM --------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Ingreso (digitado) – CONTROL PIE (m²)</div>", unsafe_allow_html=True)
@@ -1711,7 +1745,6 @@ else:
     if ejec_v is None:
         ejec_v = 0.0
 
-    # Auto-largo por DM si no digitó largo
     if (largo_v is None) and (dm_ini_v is not None) and (dm_ter_v is not None):
         largo_v = float(dm_ter_v) - float(dm_ini_v)
 
@@ -1810,8 +1843,10 @@ else:
 
         df2 = pd.concat([df_now, pd.DataFrame([nuevo])], ignore_index=True)
         save_data_pie(df2, DATA_FILE_PIE)
-        st.success("Registro guardado ✅")
-        reset_form_pie()
+
+        # ✅ pedir reset y rerun (no tocar widgets en este run)
+        request_reset_pie(clear_edit=True)
+        st.success("Registro guardado ✅ (Formulario limpiado)")
         st.rerun()
 
     # GUARDAR CAMBIOS PIE
@@ -1881,50 +1916,6 @@ else:
     with k3: kpi_card("Pendiente", str(kk.get("pend", 0)))
     with k4: kpi_card("Cumplimiento global", f"{kk.get('pct_global', 0.0):.1f}%")
 
-    k5, k6, k7, k8 = st.columns(4)
-    with k5: kpi_card("Area total", f"{kk.get('area_total', 0.0):.2f} m²")
-    with k6: kpi_card("Requeridas total", f"{kk.get('req_total', 0.0):.0f}")
-    with k7: kpi_card("Ejecutadas total", f"{kk.get('eje_total', 0.0):.0f}")
-    with k8: kpi_card("Brecha total", f"{kk.get('brecha_total', 0.0):.0f}")
-
-    st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
-
-    st.subheader("Gráficos")
-    g1, g2 = st.columns([1, 2])
-
-    with g1:
-        fig1, ax1 = plt.subplots(figsize=(FIG_W, FIG_H))
-        ax1.bar(["CUMPLE", "PENDIENTE"], [kk.get("cumple", 0), kk.get("pend", 0)])
-        ax1.set_title("Estado (tramos)", fontsize=TITLE_FS)
-        ax1.grid(axis="y", linestyle="--", alpha=0.25)
-        ax1.tick_params(axis="both", labelsize=TICK_FS)
-        plt.tight_layout(pad=0.6)
-        st.pyplot(fig1)
-
-    with g2:
-        if not df_all.empty and df_all["Fecha"].notna().any():
-            s = df_all.copy()
-            s["Fecha"] = pd.to_datetime(s["Fecha"], errors="coerce")
-            s = s.dropna(subset=["Fecha"])
-            if not s.empty:
-                agg = s.groupby(s["Fecha"].dt.date).apply(
-                    lambda g: (float(np.nansum(g["Ejecutadas"])) / float(np.nansum(g["Requeridas"])) * 100.0)
-                    if float(np.nansum(g["Requeridas"])) > 0 else 0.0
-                )
-                agg = agg.sort_index()
-                fig2, ax2 = plt.subplots(figsize=(6.2, 2.4))
-                ax2.plot(list(agg.index), list(agg.values), marker="o")
-                ax2.set_title("Cumplimiento (%) por fecha", fontsize=TITLE_FS)
-                ax2.set_ylim(0, 110)
-                ax2.grid(axis="y", linestyle="--", alpha=0.25)
-                ax2.tick_params(axis="x", rotation=45, labelsize=TICK_FS)
-                plt.tight_layout(pad=0.6)
-                st.pyplot(fig2)
-            else:
-                st.info("Sin fechas para graficar.")
-        else:
-            st.info("Sin datos para graficar.")
-
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
     st.subheader("Exportar")
@@ -1960,19 +1951,16 @@ else:
 
         sel_ids = st.multiselect("Selecciona ID_Registro a eliminar", options=ids, default=st.session_state.get("pie_del_ids", []), key="pie_del_ids")
 
-        d1, d2 = st.columns([1.4, 2.6])
-        with d1:
-            if st.button("🗑️ ELIMINAR seleccionados", type="primary", use_container_width=True):
-                if not sel_ids:
-                    st.warning("No seleccionaste ningún ID_Registro.")
-                else:
-                    df_new, n_del = delete_by_ids_pie(df_all, sel_ids)
-                    save_data_pie(df_new, DATA_FILE_PIE)
-                    st.success(f"Eliminados {n_del} registro(s).")
-                    st.session_state["pie_del_ids"] = []
-                    if st.session_state.get("PIE_EDIT_ID") in sel_ids:
-                        st.session_state["PIE_EDIT_ID"] = None
-                        st.session_state["PIE_EDIT_ROWKEY"] = None
-                    st.rerun()
-        with d2:
-            st.caption("Eliminar: por ID. Editar: arriba (Editar ID → Cargar) y luego Guardar cambios.")
+        if st.button("🗑️ ELIMINAR seleccionados", type="primary", use_container_width=True):
+            if not sel_ids:
+                st.warning("No seleccionaste ningún ID_Registro.")
+            else:
+                df_new, n_del = delete_by_ids_pie(df_all, sel_ids)
+                save_data_pie(df_new, DATA_FILE_PIE)
+                st.success(f"Eliminados {n_del} registro(s).")
+                st.session_state["pie_del_ids"] = []
+                if st.session_state.get("PIE_EDIT_ID") in sel_ids:
+                    st.session_state["PIE_EDIT_ID"] = None
+                    st.session_state["PIE_EDIT_ROWKEY"] = None
+                st.rerun()
+
