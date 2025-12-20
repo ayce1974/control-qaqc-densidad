@@ -1,12 +1,13 @@
-# =========================================================
+# # =========================================================
 # Q-INTEGRITY – APP COMPLETA (PC)
 # ✅ DENSIDADES: Pantalla 1 (Ingreso/Editar/Eliminar) + Pantalla 2 (KPIs/Dashboard/Export)
 # ✅ CONTROL PIE (m²): Módulo independiente (Ingreso/Editar/Eliminar + KPIs/Gráficos/Export)
 #
-# ✅ FIX PEDIDO: ELIMINADO COMPLETO EL CAMPO "MÉTODO"
-#   - No aparece en Pantalla 1 ni Pantalla 2
-#   - No se valida, no se guarda, no se edita
-#   - Si existía en tu Excel viejo, se ignora al cargar
+# ✅ FIX SOLICITADO: SE ELIMINA COMPLETAMENTE EL CAMPO "MÉTODO"
+# - No se muestra en UI
+# - No se valida
+# - No se guarda
+# - Se elimina de la base al re-guardar (si venía desde Excel antiguo)
 #
 # PEGAR COMPLETO EN app.py
 # =========================================================
@@ -30,7 +31,6 @@ st.set_page_config(page_title="Q-INTEGRITY", layout="wide")
 
 # Densidades
 DATA_FILE_DEN = "qintegrity_densidades.xlsx"
-TEMPLATE_FILE_DEN = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (tu plantilla)
 
 # Control PIE (m²) – módulo independiente
 DATA_FILE_PIE = "qintegrity_control_pie_m2.xlsx"
@@ -197,8 +197,7 @@ def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
 # =========================================================
 # =====================  DENSIDADES  ======================
 # =========================================================
-
-# ✅ Método eliminado: no existe "Metodo" en columnas
+# ⚠️ "Metodo" ELIMINADO
 COLUMNS_DEN = [
     "RowKey",
     "ID_Registro",
@@ -240,49 +239,35 @@ def ensure_data_file_den(path: str) -> None:
     if not os.path.exists(path):
         pd.DataFrame(columns=COLUMNS_DEN).to_excel(path, index=False, engine="openpyxl")
 
-def load_lists_from_template_den(template_path: str) -> Dict:
-    # mantiene sólo umbrales por si tu plantilla los trae
-    defaults = {"umbral_cumple": 92.0, "umbral_obs": 90.0}
-    if (not template_path) or (not os.path.exists(template_path)):
-        return defaults
-    try:
-        df_l = pd.read_excel(template_path, sheet_name="Listas")
-        umbral_cumple = defaults["umbral_cumple"]
-        umbral_obs = defaults["umbral_obs"]
-        if "Columna7" in df_l.columns and "Columna8" in df_l.columns:
-            params = pd.DataFrame({"k": df_l["Columna7"], "v": df_l["Columna8"]}).dropna()
-            params["k"] = params["k"].astype(str).str.strip()
-            for _, r in params.iterrows():
-                try:
-                    k = str(r["k"])
-                    v = float(r["v"])
-                    if "Umbral_A" in k or "UMBRAL_A" in k:
-                        umbral_cumple = v
-                    if "Umbral_O" in k or "UMBRAL_O" in k:
-                        umbral_obs = v
-                except Exception:
-                    pass
-        return {"umbral_cumple": float(umbral_cumple), "umbral_obs": float(umbral_obs)}
-    except Exception:
-        return defaults
-
 def save_data_den(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
+
+    # Si venía de archivo antiguo, elimina "Metodo" si existe
+    if "Metodo" in out.columns:
+        out = out.drop(columns=["Metodo"], errors="ignore")
+
     for c in COLUMNS_DEN:
         if c not in out.columns:
             out[c] = np.nan
+
     out = out[COLUMNS_DEN]
     out.to_excel(path, index=False, engine="openpyxl")
 
 def load_data_den(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_DEN)
 
-    # Si venía de versiones anteriores, eliminar/ignorar columna "Metodo"
+    # Limpieza de nombres históricos
+    rename_map = {
+        "Observación": "Observacion",
+        "Fecha": "Fecha_control",
+        "_RowKey": "RowKey",
+        "Método": "Metodo",  # si existiera, luego se elimina
+    }
+    df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
+
+    # Si venía con "Metodo", lo sacamos (campo eliminado)
     if "Metodo" in df.columns:
         df = df.drop(columns=["Metodo"], errors="ignore")
-
-    rename_map = {"Observación": "Observacion", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
-    df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
     for c in COLUMNS_DEN:
         if c not in df.columns:
@@ -416,7 +401,6 @@ def delete_by_ids_den(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[p
     df_new = df_new[~df_new["ID_Registro"].isin(ids_to_delete)].copy()
     return df_new, (before - len(df_new))
 
-# ✅ Método eliminado: fuera de la firma anti-duplicado
 def record_signature_den(d: Dict) -> str:
     parts = [
         str(d.get("Codigo_Proyecto","")).strip(),
@@ -558,12 +542,74 @@ def load_record_into_form_den(row: pd.Series):
 
 # INIT DENSIDADES
 ensure_data_file_den(DATA_FILE_DEN)
-tpl_den = load_lists_from_template_den(TEMPLATE_FILE_DEN)
+
+# ---------------------------------------------------------
+# SIDEBAR: NAVEGACIÓN
+# ---------------------------------------------------------
+st.sidebar.markdown("### 🧭 Navegación")
+
+if "APP_PAGE" not in st.session_state:
+    st.session_state["APP_PAGE"] = "DEN_P1"
+
+b1, b2 = st.sidebar.columns(2)
+with b1:
+    if st.button("🧾 Densidades · Ingreso", use_container_width=True):
+        st.session_state["APP_PAGE"] = "DEN_P1"
+        st.rerun()
+with b2:
+    if st.button("📊 Densidades · Dashboard", use_container_width=True):
+        st.session_state["APP_PAGE"] = "DEN_P2"
+        st.rerun()
+
+if st.sidebar.button("📐 Control PIE (m²)", use_container_width=True):
+    st.session_state["APP_PAGE"] = "PIE"
+    st.rerun()
+
+# =========================================================
+# ===============  DENSIDADES – SIDEBAR QA/QC  =============
+# =========================================================
+if st.session_state["APP_PAGE"] in ["DEN_P1", "DEN_P2"]:
+    st.sidebar.markdown("<div class='hr'></div>", unsafe_allow_html=True)
+    st.sidebar.markdown("### Parámetros QA/QC (Densidades)")
+
+    tol_hum_opt = st.sidebar.number_input(
+        "Tolerancia Humedad Óptima (±%)",
+        value=float(st.session_state.get("TOL_HUM_OPT", DEFAULT_TOL_HUM_OPT)),
+        step=0.5,
+        format="%.1f",
+    )
+    st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
+
+    if "UMBRAL_A" not in st.session_state:
+        st.session_state["UMBRAL_A"] = 92.0
+    if "UMBRAL_O_RAW" not in st.session_state:
+        st.session_state["UMBRAL_O_RAW"] = 90.0
+
+    UMBRAL_A = st.sidebar.number_input("Umbral A (CUMPLE ≥ %)", value=float(st.session_state["UMBRAL_A"]), step=0.5, format="%.1f")
+    UMBRAL_O_RAW = st.sidebar.number_input("Umbral O (OBSERVADO ≥ %)", value=float(st.session_state["UMBRAL_O_RAW"]), step=0.5, format="%.1f")
+    UMBRAL_O = adjust_umbral_obs(float(UMBRAL_A), float(UMBRAL_O_RAW), band=float(DEFAULT_OBS_BAND))
+
+    st.session_state["UMBRAL_A"] = float(UMBRAL_A)
+    st.session_state["UMBRAL_O_RAW"] = float(UMBRAL_O_RAW)
+
+    st.sidebar.markdown(
+        f"""
+<div class="qi-card">
+  <div style="font-weight:900;color:#0f172a;margin-bottom:6px">Leyenda A/O/R</div>
+  <span class="qi-chip qi-green">A · CUMPLE</span>
+  <span class="qi-chip qi-amber">O · OBSERVADO</span>
+  <span class="qi-chip qi-red">R · NO CUMPLE</span>
+  <div class="qi-muted" style="margin-top:8px;font-size:0.95rem">
+    <b>O auto-ajustado</b>: A={float(UMBRAL_A):.1f}% · O(usado)={float(UMBRAL_O):.1f}%
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 # =========================================================
 # ===================  CONTROL PIE (m²)  ===================
 # =========================================================
-
 COLUMNS_PIE = [
     "RowKey",
     "ID_Registro",
@@ -809,80 +855,6 @@ def load_record_into_form_pie(row: pd.Series):
 # INIT PIE
 ensure_data_file_pie(DATA_FILE_PIE)
 
-# ---------------------------------------------------------
-# INIT FORMS (ARRANQUE LIMPIO REAL)
-# ---------------------------------------------------------
-if "den_fecha_ctrl" not in st.session_state:
-    reset_form_den(clear_last_saved=True)
-if "pie_fecha" not in st.session_state:
-    reset_form_pie()
-if "den_keep" not in st.session_state:
-    st.session_state["den_keep"] = bool(DEFAULT_KEEP_VALUES)
-
-# ---------------------------------------------------------
-# SIDEBAR: NAVEGACIÓN
-# ---------------------------------------------------------
-st.sidebar.markdown("### 🧭 Navegación")
-
-if "APP_PAGE" not in st.session_state:
-    st.session_state["APP_PAGE"] = "DEN_P1"
-
-b1, b2 = st.sidebar.columns(2)
-with b1:
-    if st.button("🧾 Densidades · Ingreso", use_container_width=True):
-        st.session_state["APP_PAGE"] = "DEN_P1"
-        st.rerun()
-with b2:
-    if st.button("📊 Densidades · Dashboard", use_container_width=True):
-        st.session_state["APP_PAGE"] = "DEN_P2"
-        st.rerun()
-
-if st.sidebar.button("📐 Control PIE (m²)", use_container_width=True):
-    st.session_state["APP_PAGE"] = "PIE"
-    st.rerun()
-
-# =========================================================
-# ===============  DENSIDADES – SIDEBAR QA/QC  =============
-# =========================================================
-if st.session_state["APP_PAGE"] in ["DEN_P1", "DEN_P2"]:
-    st.sidebar.markdown("<div class='hr'></div>", unsafe_allow_html=True)
-    st.sidebar.markdown("### Parámetros QA/QC (Densidades)")
-
-    tol_hum_opt = st.sidebar.number_input(
-        "Tolerancia Humedad Óptima (±%)",
-        value=float(st.session_state.get("TOL_HUM_OPT", DEFAULT_TOL_HUM_OPT)),
-        step=0.5,
-        format="%.1f",
-    )
-    st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
-
-    if "UMBRAL_A" not in st.session_state:
-        st.session_state["UMBRAL_A"] = float(tpl_den.get("umbral_cumple", 92.0) or 92.0)
-    if "UMBRAL_O_RAW" not in st.session_state:
-        st.session_state["UMBRAL_O_RAW"] = float(tpl_den.get("umbral_obs", 90.0) or 90.0)
-
-    UMBRAL_A = st.sidebar.number_input("Umbral A (CUMPLE ≥ %)", value=float(st.session_state["UMBRAL_A"]), step=0.5, format="%.1f")
-    UMBRAL_O_RAW = st.sidebar.number_input("Umbral O (OBSERVADO ≥ %)", value=float(st.session_state["UMBRAL_O_RAW"]), step=0.5, format="%.1f")
-    UMBRAL_O = adjust_umbral_obs(float(UMBRAL_A), float(UMBRAL_O_RAW), band=float(DEFAULT_OBS_BAND))
-
-    st.session_state["UMBRAL_A"] = float(UMBRAL_A)
-    st.session_state["UMBRAL_O_RAW"] = float(UMBRAL_O_RAW)
-
-    st.sidebar.markdown(
-        f"""
-<div class="qi-card">
-  <div style="font-weight:900;color:#0f172a;margin-bottom:6px">Leyenda A/O/R</div>
-  <span class="qi-chip qi-green">A · CUMPLE</span>
-  <span class="qi-chip qi-amber">O · OBSERVADO</span>
-  <span class="qi-chip qi-red">R · NO CUMPLE</span>
-  <div class="qi-muted" style="margin-top:8px;font-size:0.95rem">
-    <b>O auto-ajustado</b>: A={float(UMBRAL_A):.1f}% · O(usado)={float(UMBRAL_O):.1f}%
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
 # =========================================================
 # ===================  PÁGINAS DENSIDADES  =================
 # =========================================================
@@ -923,7 +895,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             options=[None] + ids_all0,
             index=0,
             key="DEN_EDIT_PICK",
-            help="Selecciona un ID, cárgalo al formulario y luego guarda cambios (UPDATE real).",
+            help="Selecciona un ID, cárgalo al formulario y luego guarda cambios.",
         )
         if edit_id is not None:
             if st.button("✏️ Cargar ID seleccionado", use_container_width=True):
@@ -935,6 +907,9 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
                     load_record_into_form_den(row)
                     st.success(f"ID {int(edit_id)} cargado. Modifica y presiona **Guardar cambios**.")
                     st.rerun()
+
+    if "den_keep" not in st.session_state:
+        st.session_state["den_keep"] = bool(DEFAULT_KEEP_VALUES)
 
     # ---------- SECCIÓN 1 ----------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Identificación y Control</div>", unsafe_allow_html=True)
@@ -978,7 +953,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("den_prof_txt", ""), placeholder="Ej: 20", key="den_prof_txt")
     with c2:
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("den_frente", ""), key="den_frente").strip()
-        st.markdown("<div class='qi-card'><b>Método eliminado</b><br>Este módulo ya no pide ni guarda el campo <b>Método</b>.</div>", unsafe_allow_html=True)
+
     with c3:
         dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("den_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="den_dh_num")
         h_num = st.number_input("Humedad medida (%)", value=float(st.session_state.get("den_h_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="den_h_num")
@@ -1007,7 +982,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         estado_disp = estado_qaqc_den(
             float(pct_disp),
             float(st.session_state["UMBRAL_A"]),
-            adjust_umbral_obs(float(st.session_state["UMBRAL_A"]), float(st.session_state["UMBRAL_O_RAW"]))
+            adjust_umbral_obs(float(st.session_state["UMBRAL_A"]), float(st.session_state["UMBRAL_O_RAW"])),
         ) if pd.notna(pct_disp) else "—"
         delta_disp = hum_v - hopt_v
         vent_disp = "OK" if abs(delta_disp) <= float(st.session_state["TOL_HUM_OPT"]) else "OBSERVADO"
@@ -1535,6 +1510,7 @@ elif st.session_state["APP_PAGE"] == "DEN_P2":
             st.dataframe(df_view_user, use_container_width=True, height=340)
 
         a1, a2, a3, a4 = st.columns([1.2, 1.2, 1.6, 3.0])
+
         ids = sorted(df_f["ID_Registro"].dropna().astype(int).unique().tolist())
 
         with a1:
@@ -1592,7 +1568,7 @@ else:
     df_all0 = load_data_pie(DATA_FILE_PIE)
     ids_all0 = sorted(df_all0["ID_Registro"].dropna().astype(int).unique().tolist()) if not df_all0.empty else []
 
-    topb1, topb2 = st.columns([1.1, 4.9])
+    topb1, topb2, topb3 = st.columns([1.1, 3.0, 2.9])
 
     with topb1:
         if st.button("🧹 LIMPIAR", use_container_width=True):
@@ -1617,6 +1593,14 @@ else:
                     load_record_into_form_pie(row)
                     st.success(f"ID {int(edit_id)} cargado. Modifica y presiona **Guardar cambios**.")
                     st.rerun()
+
+    with topb3:
+        with st.expander("🗑️ Demo (opcional)", expanded=False):
+            if st.button("VACIAR BASE (borra todo)", type="primary", use_container_width=True):
+                save_data_pie(pd.DataFrame(columns=COLUMNS_PIE), DATA_FILE_PIE)
+                reset_form_pie()
+                st.success("Base vaciada.")
+                st.rerun()
 
     # -------- FORM --------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Ingreso (digitado) – CONTROL PIE (m²)</div>", unsafe_allow_html=True)
