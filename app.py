@@ -1,18 +1,12 @@
 # =========================================================
-# Q-INTEGRITY – APP COMPLETA (PC)
+# Q-INTEGRITY – APP COMPLETA (PC) ✅ DEMO ESTABLE
 # ✅ DENSIDADES: Pantalla 1 (Ingreso/Editar/Eliminar) + Pantalla 2 (KPIs/Dashboard/Export)
 # ✅ CONTROL PIE (m²): Módulo independiente (Ingreso/Editar/Eliminar + KPIs/Gráficos/Export)
 #
-# ✅ FIX SOLICITADO:
-# 1) SE ELIMINA COMPLETAMENTE EL CAMPO "MÉTODO"
-#    - No se muestra en UI
-#    - No se valida
-#    - No se guarda
-#    - Se elimina de la base al re-guardar (si venía desde Excel antiguo)
+# 🔥 FIX CRÍTICO (pantalla roja): NUNCA se escribe st.session_state[key] DESPUÉS de que el widget existe.
+#     -> Los resets y cargas se hacen por "señales" + rerun (safe).
 #
-# 2) FIX CRÍTICO "REVIENTA AL GUARDAR":
-#    - Guardado Excel ATÓMICO + manejo de archivo abierto (WinError 32 / PermissionError)
-#    - Si el Excel está abierto, NO revienta: muestra error claro y se detiene sin botar la app
+# 🔥 CAMBIO PEDIDO: ELIMINADO CAMPO "Metodo" (NO existe en UI, NO se guarda, NO se exige).
 #
 # PEGAR COMPLETO EN app.py
 # =========================================================
@@ -34,12 +28,11 @@ import matplotlib.pyplot as plt
 # ---------------------------------------------------------
 st.set_page_config(page_title="Q-INTEGRITY", layout="wide")
 
-# Densidades
+# Archivos
 DATA_FILE_DEN = "qintegrity_densidades.xlsx"
-
-# Control PIE (m²) – módulo independiente
 DATA_FILE_PIE = "qintegrity_control_pie_m2.xlsx"
 
+# Gráficos
 FIG_W = 3.2
 FIG_H = 2.2
 TITLE_FS = 10
@@ -48,7 +41,6 @@ LABEL_FS = 9
 
 DEFAULT_TOL_HUM_OPT = 2.0
 DEFAULT_OBS_BAND = 2.0
-DEFAULT_KEEP_VALUES = False
 
 ANTI_DOUBLECLICK_SECONDS = 1.2
 ANTI_DUPLICATE_WINDOW_SECONDS = 8
@@ -199,48 +191,11 @@ def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
         df_kpi.to_excel(writer, index=False, sheet_name="KPIs")
     return out.getvalue()
 
-# ---------------------------------------------------------
-# ESCRITURA SEGURA EXCEL (ANTI WinError 32 / archivo abierto)
-# ---------------------------------------------------------
-def _safe_write_excel(df: pd.DataFrame, path: str, sheet_name: str = "Datos") -> None:
-    """
-    Escribe Excel de forma segura:
-    - guarda a temp .tmp.xlsx
-    - luego reemplaza el archivo destino con os.replace()
-    Maneja el caso típico: archivo abierto en Excel (WinError 32).
-    """
-    folder = os.path.dirname(os.path.abspath(path)) or "."
-    tmp_path = os.path.join(folder, f".__tmp_{uuid.uuid4().hex}__.xlsx")
-
-    try:
-        df.to_excel(tmp_path, index=False, engine="openpyxl", sheet_name=sheet_name)
-        os.replace(tmp_path, path)
-    except PermissionError:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
-
-        st.error(
-            "❌ No se pudo guardar porque el archivo Excel está en uso.\n\n"
-            f"Archivo: **{path}**\n\n"
-            "✅ Solución: cierra Excel (y cualquier visor) que tenga ese archivo abierto y vuelve a intentar."
-        )
-        st.stop()
-    except Exception as e:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
-        st.error(f"❌ Error inesperado al guardar: {type(e).__name__}: {e}")
-        st.stop()
-
 # =========================================================
 # =====================  DENSIDADES  ======================
 # =========================================================
-# ⚠️ "Metodo" ELIMINADO
+
+# 🔥 Metodo ELIMINADO
 COLUMNS_DEN = [
     "RowKey",
     "ID_Registro",
@@ -280,37 +235,35 @@ COLUMNS_DEN = [
 
 def ensure_data_file_den(path: str) -> None:
     if not os.path.exists(path):
-        _safe_write_excel(pd.DataFrame(columns=COLUMNS_DEN), path, sheet_name="Datos")
+        pd.DataFrame(columns=COLUMNS_DEN).to_excel(path, index=False, engine="openpyxl")
 
 def save_data_den(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
-
-    # Si venía de archivo antiguo, elimina "Metodo" si existe
+    # Limpia columna vieja "Metodo" si venía de antes
     if "Metodo" in out.columns:
-        out = out.drop(columns=["Metodo"], errors="ignore")
-
+        out = out.drop(columns=["Metodo"])
     for c in COLUMNS_DEN:
         if c not in out.columns:
             out[c] = np.nan
-
     out = out[COLUMNS_DEN]
-    _safe_write_excel(out, path, sheet_name="Datos")
+    out.to_excel(path, index=False, engine="openpyxl")
 
 def load_data_den(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_DEN)
 
-    # Limpieza de nombres históricos
+    # Compat: renombres comunes
     rename_map = {
         "Observación": "Observacion",
         "Fecha": "Fecha_control",
         "_RowKey": "RowKey",
-        "Método": "Metodo",  # si existiera, luego se elimina
+        "Método": "Metodo",   # por si venía de antes (se elimina)
+        "Metodo": "Metodo",
     }
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
-    # Si venía con "Metodo", lo sacamos (campo eliminado)
+    # Si existe "Metodo" (legacy), la borramos
     if "Metodo" in df.columns:
-        df = df.drop(columns=["Metodo"], errors="ignore")
+        df = df.drop(columns=["Metodo"])
 
     for c in COLUMNS_DEN:
         if c not in df.columns:
@@ -331,9 +284,8 @@ def load_data_den(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Detectar RowKey vacío/NA ANTES de astype(str)
-    needs_key = df["RowKey"].isna() | (df["RowKey"].astype(str).str.strip() == "") | (df["RowKey"].astype(str).str.lower() == "nan")
     df["RowKey"] = df["RowKey"].astype(str)
+    needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
         df.loc[needs_key, "RowKey"] = [_safe_uuid() for _ in range(int(needs_key.sum()))]
         save_data_den(df, path)
@@ -471,7 +423,7 @@ def is_duplicate_recent_den(df: pd.DataFrame, sig: str, seconds: int = ANTI_DUPL
         d2 = df.dropna(subset=["Timestamp"]).copy()
         if d2.empty:
             return False
-        d2 = d2.sort_values("Timestamp", ascending=False).head(50)
+        d2 = d2.sort_values("Timestamp", ascending=False).head(80)
         d2["__sig"] = d2.apply(lambda r: record_signature_den(r.to_dict()), axis=1)
         d2["__dt"] = pd.to_datetime(d2["Timestamp"], errors="coerce")
         d2 = d2.dropna(subset=["__dt"])
@@ -505,8 +457,39 @@ def apply_update_by_rowkey_den(df: pd.DataFrame, rowkey: str, new_values: Dict) 
             d.loc[mask, k] = v
     return d, True
 
-def reset_form_den(clear_last_saved: bool = True):
-    defaults = {
+# ---- Session helpers (SAFE: señal + rerun)
+DEN_FORM_KEYS = [
+    "den_fecha_ctrl",
+    "den_cod_proy",
+    "den_proyecto",
+    "den_n_reg",
+    "den_n_ctrl",
+    "den_n_acta",
+    "den_sector_txt",
+    "den_tramo_txt",
+    "den_frente",
+    "den_capa_txt",
+    "den_esp_txt",
+    "den_dm_ini_txt",
+    "den_dm_ter_txt",
+    "den_dm_ctrl_txt",
+    "den_coord_n_txt",
+    "den_coord_e_txt",
+    "den_cota_txt",
+    "den_operador",
+    "den_prof_txt",
+    "den_obs",
+    "den_dh_num",
+    "den_h_num",
+    "den_hopt_num",
+    "den_dmcs_num",
+    "den_del_ids",
+    "DEN_EDIT_ID",
+    "DEN_EDIT_ROWKEY",
+]
+
+def _den_defaults() -> Dict:
+    return {
         "den_fecha_ctrl": date.today(),
         "den_cod_proy": "",
         "den_proyecto": "",
@@ -535,14 +518,35 @@ def reset_form_den(clear_last_saved: bool = True):
         "DEN_EDIT_ID": None,
         "DEN_EDIT_ROWKEY": None,
     }
-    for k, v in defaults.items():
+
+def schedule_den_reset(clear_last_saved: bool = True):
+    st.session_state["_DEN_DO_RESET"] = True
+    st.session_state["_DEN_CLEAR_LAST_SAVED"] = bool(clear_last_saved)
+    st.rerun()
+
+def apply_den_reset_if_needed():
+    if not st.session_state.get("_DEN_DO_RESET", False):
+        return
+    clear_last_saved = bool(st.session_state.get("_DEN_CLEAR_LAST_SAVED", True))
+
+    for k in DEN_FORM_KEYS:
+        if k in st.session_state:
+            del st.session_state[k]
+
+    d = _den_defaults()
+    for k, v in d.items():
         st.session_state[k] = v
-    if clear_last_saved:
-        st.session_state.pop("DEN_LAST_SAVED", None)
+
+    if clear_last_saved and "DEN_LAST_SAVED" in st.session_state:
+        del st.session_state["DEN_LAST_SAVED"]
+
+    st.session_state["_DEN_DO_RESET"] = False
+    st.session_state["_DEN_CLEAR_LAST_SAVED"] = False
 
 def set_last_saved_den(calc: Optional[Dict]):
     if calc is None:
-        st.session_state.pop("DEN_LAST_SAVED", None)
+        if "DEN_LAST_SAVED" in st.session_state:
+            del st.session_state["DEN_LAST_SAVED"]
     else:
         st.session_state["DEN_LAST_SAVED"] = calc
 
@@ -550,7 +554,27 @@ def get_last_saved_den() -> Optional[Dict]:
     d = st.session_state.get("DEN_LAST_SAVED", None)
     return d if isinstance(d, dict) else None
 
-def load_record_into_form_den(row: pd.Series):
+def schedule_den_load_record(rowkey: str, rid: int):
+    st.session_state["_DEN_DO_LOAD"] = True
+    st.session_state["_DEN_LOAD_ROWKEY"] = str(rowkey)
+    st.session_state["_DEN_LOAD_ID"] = int(rid)
+    st.rerun()
+
+def apply_den_load_if_needed():
+    if not st.session_state.get("_DEN_DO_LOAD", False):
+        return
+    rk = st.session_state.get("_DEN_LOAD_ROWKEY")
+    rid = st.session_state.get("_DEN_LOAD_ID")
+    st.session_state["_DEN_DO_LOAD"] = False
+
+    df = load_data_den(DATA_FILE_DEN)
+    row = get_record_by_id_den(df, int(rid)) if rid else None
+    if row is None:
+        st.session_state["DEN_EDIT_ID"] = None
+        st.session_state["DEN_EDIT_ROWKEY"] = None
+        return
+
+    # set values BEFORE widgets are created (we are here at top of page run)
     st.session_state["DEN_EDIT_ID"] = int(row.get("ID_Registro"))
     st.session_state["DEN_EDIT_ROWKEY"] = str(row.get("RowKey"))
 
@@ -584,72 +608,8 @@ def load_record_into_form_den(row: pd.Series):
     st.session_state["den_dmcs_num"] = float(row.get("DMCS_Proctor_gcm3")) if pd.notna(row.get("DMCS_Proctor_gcm3")) else 0.0
     st.session_state["den_obs"] = str(row.get("Observacion") or "")
 
-# INIT DENSIDADES
+# INIT
 ensure_data_file_den(DATA_FILE_DEN)
-
-# ---------------------------------------------------------
-# SIDEBAR: NAVEGACIÓN
-# ---------------------------------------------------------
-st.sidebar.markdown("### 🧭 Navegación")
-
-if "APP_PAGE" not in st.session_state:
-    st.session_state["APP_PAGE"] = "DEN_P1"
-
-b1, b2 = st.sidebar.columns(2)
-with b1:
-    if st.button("🧾 Densidades · Ingreso", use_container_width=True):
-        st.session_state["APP_PAGE"] = "DEN_P1"
-        st.rerun()
-with b2:
-    if st.button("📊 Densidades · Dashboard", use_container_width=True):
-        st.session_state["APP_PAGE"] = "DEN_P2"
-        st.rerun()
-
-if st.sidebar.button("📐 Control PIE (m²)", use_container_width=True):
-    st.session_state["APP_PAGE"] = "PIE"
-    st.rerun()
-
-# =========================================================
-# ===============  DENSIDADES – SIDEBAR QA/QC  =============
-# =========================================================
-if st.session_state["APP_PAGE"] in ["DEN_P1", "DEN_P2"]:
-    st.sidebar.markdown("<div class='hr'></div>", unsafe_allow_html=True)
-    st.sidebar.markdown("### Parámetros QA/QC (Densidades)")
-
-    tol_hum_opt = st.sidebar.number_input(
-        "Tolerancia Humedad Óptima (±%)",
-        value=float(st.session_state.get("TOL_HUM_OPT", DEFAULT_TOL_HUM_OPT)),
-        step=0.5,
-        format="%.1f",
-    )
-    st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
-
-    if "UMBRAL_A" not in st.session_state:
-        st.session_state["UMBRAL_A"] = 92.0
-    if "UMBRAL_O_RAW" not in st.session_state:
-        st.session_state["UMBRAL_O_RAW"] = 90.0
-
-    UMBRAL_A = st.sidebar.number_input("Umbral A (CUMPLE ≥ %)", value=float(st.session_state["UMBRAL_A"]), step=0.5, format="%.1f")
-    UMBRAL_O_RAW = st.sidebar.number_input("Umbral O (OBSERVADO ≥ %)", value=float(st.session_state["UMBRAL_O_RAW"]), step=0.5, format="%.1f")
-    UMBRAL_O = adjust_umbral_obs(float(UMBRAL_A), float(UMBRAL_O_RAW), band=float(DEFAULT_OBS_BAND))
-
-    st.session_state["UMBRAL_A"] = float(UMBRAL_A)
-    st.session_state["UMBRAL_O_RAW"] = float(UMBRAL_O_RAW)
-
-    st.sidebar.markdown(
-        f"""
-<div class="qi-card">
-  <div style="font-weight:900;color:#0f172a;margin-bottom:6px">Leyenda A/O/R</div>
-  <span class="qi-chip qi-green">A · CUMPLE</span>
-  <span class="qi-chip qi-amber">O · OBSERVADO</span>
-  <span class="qi-chip qi-red">R · NO CUMPLE</span>
-  <div class="qi-muted" style="margin-top:8px;font-size:0.95rem">
-    <b>O auto-ajustado</b>: A={float(UMBRAL_A):.1f}% · O(usado)={float(UMBRAL_O):.1f}%
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
 
 # =========================================================
 # ===================  CONTROL PIE (m²)  ===================
@@ -677,7 +637,7 @@ COLUMNS_PIE = [
 
 def ensure_data_file_pie(path: str) -> None:
     if not os.path.exists(path):
-        _safe_write_excel(pd.DataFrame(columns=COLUMNS_PIE), path, sheet_name="Datos")
+        pd.DataFrame(columns=COLUMNS_PIE).to_excel(path, index=False, engine="openpyxl")
 
 def save_data_pie(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
@@ -685,7 +645,7 @@ def save_data_pie(df: pd.DataFrame, path: str) -> None:
         if c not in out.columns:
             out[c] = np.nan
     out = out[COLUMNS_PIE]
-    _safe_write_excel(out, path, sheet_name="Datos")
+    out.to_excel(path, index=False, engine="openpyxl")
 
 def load_data_pie(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_PIE)
@@ -712,8 +672,8 @@ def load_data_pie(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    needs_key = df["RowKey"].isna() | (df["RowKey"].astype(str).str.strip() == "") | (df["RowKey"].astype(str).str.lower() == "nan")
     df["RowKey"] = df["RowKey"].astype(str)
+    needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
         df.loc[needs_key, "RowKey"] = [_safe_uuid() for _ in range(int(needs_key.sum()))]
         save_data_pie(df, path)
@@ -860,8 +820,14 @@ def compute_kpis_pie(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         "pct_global": pct_global,
     }
 
-def reset_form_pie():
-    defaults = {
+PIE_FORM_KEYS = [
+    "pie_fecha","pie_cod","pie_sector","pie_frente","pie_dm_ini","pie_dm_ter",
+    "pie_largo","pie_ancho","pie_valor","pie_ejec",
+    "PIE_EDIT_ID","PIE_EDIT_ROWKEY","pie_del_ids"
+]
+
+def _pie_defaults() -> Dict:
+    return {
         "pie_fecha": date.today(),
         "pie_cod": "",
         "pie_sector": "",
@@ -876,10 +842,39 @@ def reset_form_pie():
         "PIE_EDIT_ROWKEY": None,
         "pie_del_ids": [],
     }
-    for k, v in defaults.items():
-        st.session_state[k] = v
 
-def load_record_into_form_pie(row: pd.Series):
+def schedule_pie_reset():
+    st.session_state["_PIE_DO_RESET"] = True
+    st.rerun()
+
+def apply_pie_reset_if_needed():
+    if not st.session_state.get("_PIE_DO_RESET", False):
+        return
+    for k in PIE_FORM_KEYS:
+        if k in st.session_state:
+            del st.session_state[k]
+    d = _pie_defaults()
+    for k, v in d.items():
+        st.session_state[k] = v
+    st.session_state["_PIE_DO_RESET"] = False
+
+def schedule_pie_load_record(row: pd.Series):
+    st.session_state["_PIE_DO_LOAD"] = True
+    st.session_state["_PIE_LOAD_ID"] = int(row.get("ID_Registro"))
+    st.rerun()
+
+def apply_pie_load_if_needed():
+    if not st.session_state.get("_PIE_DO_LOAD", False):
+        return
+    st.session_state["_PIE_DO_LOAD"] = False
+    rid = st.session_state.get("_PIE_LOAD_ID")
+    df = load_data_pie(DATA_FILE_PIE)
+    row = get_record_by_id_pie(df, int(rid)) if rid else None
+    if row is None:
+        st.session_state["PIE_EDIT_ID"] = None
+        st.session_state["PIE_EDIT_ROWKEY"] = None
+        return
+
     st.session_state["PIE_EDIT_ID"] = int(row.get("ID_Registro"))
     st.session_state["PIE_EDIT_ROWKEY"] = str(row.get("RowKey"))
 
@@ -899,14 +894,78 @@ def load_record_into_form_pie(row: pd.Series):
 # INIT PIE
 ensure_data_file_pie(DATA_FILE_PIE)
 
+# ---------------------------------------------------------
+# SIDEBAR: NAVEGACIÓN
+# ---------------------------------------------------------
+st.sidebar.markdown("### 🧭 Navegación")
+
+if "APP_PAGE" not in st.session_state:
+    st.session_state["APP_PAGE"] = "DEN_P1"
+
+b1, b2 = st.sidebar.columns(2)
+with b1:
+    if st.button("🧾 Densidades · Ingreso", use_container_width=True):
+        st.session_state["APP_PAGE"] = "DEN_P1"
+        st.rerun()
+with b2:
+    if st.button("📊 Densidades · Dashboard", use_container_width=True):
+        st.session_state["APP_PAGE"] = "DEN_P2"
+        st.rerun()
+
+if st.sidebar.button("📐 Control PIE (m²)", use_container_width=True):
+    st.session_state["APP_PAGE"] = "PIE"
+    st.rerun()
+
+# =========================================================
+# ===============  DENSIDADES – SIDEBAR QA/QC  =============
+# =========================================================
+if st.session_state["APP_PAGE"] in ["DEN_P1", "DEN_P2"]:
+    st.sidebar.markdown("<div class='hr'></div>", unsafe_allow_html=True)
+    st.sidebar.markdown("### Parámetros QA/QC (Densidades)")
+
+    tol_hum_opt = st.sidebar.number_input(
+        "Tolerancia Humedad Óptima (±%)",
+        value=float(st.session_state.get("TOL_HUM_OPT", DEFAULT_TOL_HUM_OPT)),
+        step=0.5,
+        format="%.1f",
+    )
+    st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
+
+    if "UMBRAL_A" not in st.session_state:
+        st.session_state["UMBRAL_A"] = 92.0
+    if "UMBRAL_O_RAW" not in st.session_state:
+        st.session_state["UMBRAL_O_RAW"] = 90.0
+
+    UMBRAL_A = st.sidebar.number_input("Umbral A (CUMPLE ≥ %)", value=float(st.session_state["UMBRAL_A"]), step=0.5, format="%.1f")
+    UMBRAL_O_RAW = st.sidebar.number_input("Umbral O (OBSERVADO ≥ %)", value=float(st.session_state["UMBRAL_O_RAW"]), step=0.5, format="%.1f")
+    UMBRAL_O = adjust_umbral_obs(float(UMBRAL_A), float(UMBRAL_O_RAW), band=float(DEFAULT_OBS_BAND))
+
+    st.session_state["UMBRAL_A"] = float(UMBRAL_A)
+    st.session_state["UMBRAL_O_RAW"] = float(UMBRAL_O_RAW)
+
+    st.sidebar.markdown(
+        f"""
+<div class="qi-card">
+  <div style="font-weight:900;color:#0f172a;margin-bottom:6px">Leyenda A/O/R</div>
+  <span class="qi-chip qi-green">A · CUMPLE</span>
+  <span class="qi-chip qi-amber">O · OBSERVADO</span>
+  <span class="qi-chip qi-red">R · NO CUMPLE</span>
+  <div class="qi-muted" style="margin-top:8px;font-size:0.95rem">
+    <b>O auto-ajustado</b>: A={float(UMBRAL_A):.1f}% · O(usado)={float(UMBRAL_O):.1f}%
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
 # =========================================================
 # ===================  PÁGINAS DENSIDADES  =================
 # =========================================================
-
-# -------------------------
-# DENSIDADES – PANTALLA 1
-# -------------------------
 if st.session_state["APP_PAGE"] == "DEN_P1":
+    # ---- Apply pending actions SAFE (antes de widgets)
+    apply_den_reset_if_needed()
+    apply_den_load_if_needed()
+
     st.caption("Densidades · Pantalla 1 · Ingreso + Cálculos + Ver/Editar/Eliminar + Export")
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
@@ -925,8 +984,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
 
     with topb2:
         if st.button("🧹 LIMPIAR", use_container_width=True):
-            reset_form_den(clear_last_saved=True)
-            st.rerun()
+            schedule_den_reset(clear_last_saved=True)
 
     with topb3:
         if st.button("🔄 RECALCULAR", use_container_width=True):
@@ -948,12 +1006,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
                 if row is None:
                     st.error("No encontré ese ID en la base.")
                 else:
-                    load_record_into_form_den(row)
-                    st.success(f"ID {int(edit_id)} cargado. Modifica y presiona **Guardar cambios**.")
-                    st.rerun()
-
-    if "den_keep" not in st.session_state:
-        st.session_state["den_keep"] = bool(DEFAULT_KEEP_VALUES)
+                    schedule_den_load_record(rowkey=str(row.get("RowKey")), rid=int(edit_id))
 
     # ---------- SECCIÓN 1 ----------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Identificación y Control</div>", unsafe_allow_html=True)
@@ -997,7 +1050,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("den_prof_txt", ""), placeholder="Ej: 20", key="den_prof_txt")
     with c2:
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("den_frente", ""), key="den_frente").strip()
-
+        st.caption("Campo Método eliminado ✅")
     with c3:
         dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("den_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="den_dh_num")
         h_num = st.number_input("Humedad medida (%)", value=float(st.session_state.get("den_h_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="den_h_num")
@@ -1026,7 +1079,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         estado_disp = estado_qaqc_den(
             float(pct_disp),
             float(st.session_state["UMBRAL_A"]),
-            adjust_umbral_obs(float(st.session_state["UMBRAL_A"]), float(st.session_state["UMBRAL_O_RAW"])),
+            adjust_umbral_obs(float(st.session_state["UMBRAL_A"]), float(st.session_state["UMBRAL_O_RAW"]))
         ) if pd.notna(pct_disp) else "—"
         delta_disp = hum_v - hopt_v
         vent_disp = "OK" if abs(delta_disp) <= float(st.session_state["TOL_HUM_OPT"]) else "OBSERVADO"
@@ -1079,7 +1132,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         else:
             st.info("Modo nuevo registro ✅")
 
-    # GUARDAR NUEVO
+    # GUARDAR NUEVO (NO hace reset directo: agenda reset SAFE)
     if guardar:
         now_ts = time.time()
         last_ts = float(st.session_state.get("DEN_LAST_SUBMIT_TS", 0.0))
@@ -1203,15 +1256,16 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
             "estado": str(estado),
         })
 
+        # Reset SAFE: agenda reset para el próximo run (no rompe)
         if not bool(st.session_state.get("den_keep", False)):
-            reset_form_den(clear_last_saved=False)
             st.session_state["DEN_EDIT_ID"] = None
             st.session_state["DEN_EDIT_ROWKEY"] = None
+            schedule_den_reset(clear_last_saved=False)
 
         st.success("Registro guardado correctamente ✅")
         st.rerun()
 
-    # GUARDAR CAMBIOS
+    # GUARDAR CAMBIOS (EDIT)
     if guardar_cambios:
         rowkey = st.session_state.get("DEN_EDIT_ROWKEY")
         rid = st.session_state.get("DEN_EDIT_ID")
@@ -1333,6 +1387,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         st.success(f"Cambios guardados ✅ (ID {int(rid)})")
         st.rerun()
 
+    # EXPORT BASE + TABLA + ELIMINAR
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
     df_all = load_data_den(DATA_FILE_DEN)
     df_kpi_all, _ = compute_kpis_den(df_all)
@@ -1390,9 +1445,6 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
         with d2:
             st.caption("Eliminar: por **ID_Registro**. Editar: **Editar ID → Cargar** y luego **Guardar cambios**.")
 
-# -------------------------
-# DENSIDADES – PANTALLA 2
-# -------------------------
 elif st.session_state["APP_PAGE"] == "DEN_P2":
     st.caption("Densidades · Pantalla 2 · Dashboard KPIs + Gráficos + Control + Tabla + Export")
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
@@ -1567,10 +1619,8 @@ elif st.session_state["APP_PAGE"] == "DEN_P2":
                     if row is None:
                         st.error("No encontré ese ID.")
                     else:
-                        load_record_into_form_den(row)
+                        schedule_den_load_record(rowkey=str(row.get("RowKey")), rid=int(p2_edit_id))
                         st.session_state["APP_PAGE"] = "DEN_P1"
-                        st.success("Cargado en Densidades · Ingreso. Edita y presiona Guardar cambios (EDIT).")
-                        st.rerun()
 
         with a2:
             prev_sel = st.session_state.get("den_p2_del", [])
@@ -1606,6 +1656,9 @@ elif st.session_state["APP_PAGE"] == "DEN_P2":
 # ====================  CONTROL PIE (m²)  ==================
 # =========================================================
 else:
+    apply_pie_reset_if_needed()
+    apply_pie_load_if_needed()
+
     st.caption("Control PIE (m²) · Módulo independiente · Ingreso + KPIs + Gráficos + Ver/Editar/Eliminar + Export")
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
@@ -1616,8 +1669,7 @@ else:
 
     with topb1:
         if st.button("🧹 LIMPIAR", use_container_width=True):
-            reset_form_pie()
-            st.rerun()
+            schedule_pie_reset()
 
     with topb2:
         edit_id = st.selectbox(
@@ -1634,17 +1686,13 @@ else:
                 if row is None:
                     st.error("No encontré ese ID.")
                 else:
-                    load_record_into_form_pie(row)
-                    st.success(f"ID {int(edit_id)} cargado. Modifica y presiona **Guardar cambios**.")
-                    st.rerun()
+                    schedule_pie_load_record(row)
 
     with topb3:
         with st.expander("🗑️ Demo (opcional)", expanded=False):
             if st.button("VACIAR BASE (borra todo)", type="primary", use_container_width=True):
                 save_data_pie(pd.DataFrame(columns=COLUMNS_PIE), DATA_FILE_PIE)
-                reset_form_pie()
-                st.success("Base vaciada.")
-                st.rerun()
+                schedule_pie_reset()
 
     # -------- FORM --------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Ingreso (digitado) – CONTROL PIE (m²)</div>", unsafe_allow_html=True)
@@ -1737,7 +1785,6 @@ else:
         else:
             st.info("Modo nuevo registro ✅")
 
-    # GUARDAR NUEVO PIE
     if pie_guardar:
         now_ts = time.time()
         last_ts = float(st.session_state.get("PIE_LAST_SUBMIT_TS", 0.0))
@@ -1796,10 +1843,8 @@ else:
         df2 = pd.concat([df_now, pd.DataFrame([nuevo])], ignore_index=True)
         save_data_pie(df2, DATA_FILE_PIE)
         st.success("Registro guardado ✅")
-        reset_form_pie()
-        st.rerun()
+        schedule_pie_reset()
 
-    # GUARDAR CAMBIOS PIE
     if pie_guardar_cambios:
         rowkey = st.session_state.get("PIE_EDIT_ROWKEY")
         rid = st.session_state.get("PIE_EDIT_ID")
@@ -1960,4 +2005,3 @@ else:
                     st.rerun()
         with d2:
             st.caption("Eliminar: por ID. Editar: arriba (Editar ID → Cargar) y luego Guardar cambios.")
-
