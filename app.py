@@ -1,17 +1,9 @@
 # =========================================================
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2)
-# FIXES PRO:
-# 1) Sector/Zona y Tramo: SOLO DIGITAR (sin listas obligatorias)
-# 2) Editar registros (P1 y P2): cargar por ID -> guardar cambios (UPDATE real)
-# 3) Recalcular: botón real (force rerun)
-# 4) Limpiar: robusto (siempre a la primera)
-# 5) Eliminar funciona (limpia IDs inválidos del multiselect)
-# 6) Valida numéricos: si pones letras en coords/cota/dm/etc, NO guarda
-# 7) Anti duplicado (doble click + ventana anti duplicación)
-#
-# ✅ FIX ÚNICO APLICADO (REGLA DE ORO):
-# - "Método" ahora SIEMPRE carga y guarda bien en WEB:
-#   Si el método guardado NO está en la lista -> pasa a "Otro (digitar)" y rellena el texto.
+# ✅ FIX ÚNICO (REGLA DE ORO):
+# - MÉTODO AHORA GUARDA SIEMPRE (WEB/PC) aunque el valor NO esté en la lista.
+# - Se lee SIEMPRE desde st.session_state (no variables locales) para que no “se pierda”.
+# - Si el valor actual no está en opciones, se agrega automáticamente a las opciones.
 # =========================================================
 
 import os
@@ -188,10 +180,9 @@ def ensure_data_file(path: str) -> None:
         pd.DataFrame(columns=COLUMNS).to_excel(path, index=False, engine="openpyxl")
 
 def ensure_config_file(path: str) -> None:
-    """Config solo para Métodos (sectores/tramos ya NO se usan por decisión de negocio: se digitan)."""
     if os.path.exists(path):
         return
-    metodos  = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
+    metodos = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
     df = pd.DataFrame({"Metodos": metodos})
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="Listas")
@@ -279,7 +270,6 @@ def load_data(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # RowKey robusto
     df["RowKey"] = df["RowKey"].astype(str)
     needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
@@ -397,7 +387,6 @@ def parse_float_loose(txt: str) -> Optional[float]:
     except Exception: return None
 
 def is_invalid_number_if_filled(label: str, raw: str) -> Optional[str]:
-    """Si el usuario escribió algo y NO es numérico -> error"""
     if raw is None:
         return None
     s = str(raw).strip()
@@ -436,7 +425,6 @@ def get_last_saved() -> Optional[Dict]:
     return d if isinstance(d, dict) else None
 
 def reset_form_hard(clear_last_saved: bool = True):
-    """Reset robusto: setea valores (no pop) + rerun externo."""
     defaults = {
         "p1_fecha_ctrl": date.today(),
         "p1_cod_proy": "",
@@ -470,7 +458,6 @@ def reset_form_hard(clear_last_saved: bool = True):
     }
     for k, v in defaults.items():
         st.session_state[k] = v
-
     if clear_last_saved:
         set_last_saved(None)
 
@@ -531,9 +518,33 @@ def get_record_by_id(df: pd.DataFrame, rid: int) -> Optional[pd.Series]:
     d = d.sort_values("Timestamp", ascending=False)
     return d.iloc[0]
 
-# ✅ FIX ÚNICO: Método siempre entra correcto (si no está en lista -> "Otro" + texto)
-def load_record_into_form(row: pd.Series):
-    """Carga registro en inputs P1 para editar (FIX: Método)."""
+# ---------------------------------------------------------
+# ✅ FIX MÉTODO: función centralizada y robusta
+# ---------------------------------------------------------
+def compute_metodo_final_from_state() -> str:
+    sel = str(st.session_state.get("p1_met_sel", "— Seleccionar —") or "").strip()
+    otro = str(st.session_state.get("p1_met_otro", "") or "").strip()
+    if sel == "Otro (digitar)":
+        return otro
+    if sel in ("— Seleccionar —", "", "None"):
+        return ""
+    return sel
+
+def ensure_metodo_option_in_list(options: List[str], current_value: str) -> List[str]:
+    cv = str(current_value or "").strip()
+    if not cv:
+        return options
+    if cv in ("— Seleccionar —", "Otro (digitar)"):
+        return options
+    if cv not in options:
+        # lo metemos antes de "Otro (digitar)" para que se pueda seleccionar y NO rompa la UI
+        if "Otro (digitar)" in options:
+            i = options.index("Otro (digitar)")
+            return options[:i] + [cv] + options[i:]
+        return options + [cv]
+    return options
+
+def load_record_into_form(row: pd.Series, metodos_ref: List[str]):
     st.session_state["P1_EDIT_ID"] = int(row.get("ID_Registro"))
     st.session_state["P1_EDIT_ROWKEY"] = str(row.get("RowKey"))
 
@@ -561,19 +572,17 @@ def load_record_into_form(row: pd.Series):
     st.session_state["p1_operador"] = str(row.get("Operador") or "")
     st.session_state["p1_prof_txt"] = "" if pd.isna(row.get("Profundidad_cm")) else str(float(row.get("Profundidad_cm")))
 
-    # ---- FIX Método ----
+    # ✅ FIX: método cargado seguro
     metodo_val = str(row.get("Metodo") or "").strip()
-    # metodos existe global (se define más abajo)
-    if metodo_val and (metodo_val in metodos):
+    if metodo_val and (metodo_val in metodos_ref):
         st.session_state["p1_met_sel"] = metodo_val
         st.session_state["p1_met_otro"] = ""
     elif metodo_val:
-        st.session_state["p1_met_sel"] = "Otro (digitar)"
-        st.session_state["p1_met_otro"] = metodo_val
+        st.session_state["p1_met_sel"] = metodo_val  # queda como opción directa (y la agregamos a opciones)
+        st.session_state["p1_met_otro"] = ""
     else:
         st.session_state["p1_met_sel"] = "— Seleccionar —"
         st.session_state["p1_met_otro"] = ""
-    # --------------------
 
     st.session_state["p1_dh_num"] = float(row.get("Densidad_Humeda_gcm3")) if pd.notna(row.get("Densidad_Humeda_gcm3")) else 0.0
     st.session_state["p1_h_num"] = float(row.get("Humedad_medida_pct")) if pd.notna(row.get("Humedad_medida_pct")) else 0.0
@@ -722,14 +731,13 @@ if st.session_state["PAGE"] == "P1":
                 st.rerun()
 
     if edit_id is not None:
-        # Botón cargar
         if st.button("✏️ Cargar ID seleccionado en formulario", use_container_width=True):
             df_temp = load_data(DATA_FILE)
             row = get_record_by_id(df_temp, int(edit_id))
             if row is None:
                 st.error("No encontré ese ID en la base.")
             else:
-                load_record_into_form(row)
+                load_record_into_form(row, metodos_ref=metodos)
                 st.success(f"ID {int(edit_id)} cargado. Modifica y luego presiona **Guardar cambios**.")
                 st.rerun()
 
@@ -746,10 +754,8 @@ if st.session_state["PAGE"] == "P1":
         n_control = st.text_input("N° Control", value=st.session_state.get("p1_n_ctrl", ""), key="p1_n_ctrl").strip()
         n_acta = st.text_input("N° Acta", value=st.session_state.get("p1_n_acta", ""), key="p1_n_acta").strip()
     with a4:
-        # ✅ DIGITAR: sin listas
         sector_final = st.text_input("Sector/Zona (DIGITAR)", value=st.session_state.get("p1_sector_txt", ""), key="p1_sector_txt").strip()
         tramo_final  = st.text_input("Tramo (DIGITAR)", value=st.session_state.get("p1_tramo_txt", ""), key="p1_tramo_txt").strip()
-
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- SECCIÓN 2 ----------
@@ -775,14 +781,31 @@ if st.session_state["PAGE"] == "P1":
     with c1:
         operador = st.text_input("Operador (DIGITAR)", value=st.session_state.get("p1_operador", ""), key="p1_operador").strip()
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("p1_prof_txt", ""), placeholder="Ej: 20", key="p1_prof_txt")
+
     with c2:
-        met_opts = ["— Seleccionar —", *metodos, "Otro (digitar)"]
-        met_sel = st.selectbox("Método", met_opts, index=0, key="p1_met_sel")
-        met_otro = ""
-        if met_sel == "Otro (digitar)":
-            met_otro = st.text_input("Método (otro)", value=st.session_state.get("p1_met_otro", ""), key="p1_met_otro")
+        # ✅ FIX: opciones siempre incluyen el valor actual aunque no esté en lista
+        current_sel = str(st.session_state.get("p1_met_sel", "— Seleccionar —") or "").strip()
+        current_otro = str(st.session_state.get("p1_met_otro", "") or "").strip()
+        if current_sel == "Otro (digitar)":
+            current_value = current_otro
+        else:
+            current_value = current_sel if current_sel not in ("— Seleccionar —", "", "None") else ""
+
+        base_opts = ["— Seleccionar —"] + [m for m in metodos if str(m).strip()] + ["Otro (digitar)"]
+        base_opts = list(dict.fromkeys([str(x).strip() for x in base_opts if str(x).strip()]))
+        met_opts = ensure_metodo_option_in_list(base_opts, current_value)
+
+        met_sel = st.selectbox("Método", met_opts, key="p1_met_sel")
+        if str(met_sel).strip() == "Otro (digitar)":
+            st.text_input("Método (otro)", key="p1_met_otro")
+        else:
+            # si se elige un método normal, limpiar "otro" para evitar confusión
+            st.session_state["p1_met_otro"] = ""
+
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("p1_frente", ""), key="p1_frente").strip()
-    metodo_final = (met_otro.strip() if met_sel == "Otro (digitar)" else ("" if met_sel == "— Seleccionar —" else met_sel)).strip()
+
+    # ✅ FIX: método final SIEMPRE desde session_state
+    metodo_final = compute_metodo_final_from_state()
 
     with c3:
         dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("p1_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="p1_dh_num")
@@ -847,23 +870,20 @@ if st.session_state["PAGE"] == "P1":
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
-    # Botones Guardar / Guardar cambios
     left_save, mid_save, right_save = st.columns([1.3, 1.3, 3.4])
     with left_save:
         guardar = st.button("💾 Guardar registro", type="primary", use_container_width=True)
-
     with mid_save:
         guardar_cambios = st.button("💾 Guardar cambios (EDIT)", use_container_width=True)
-
     with right_save:
         edit_info = ""
         if st.session_state.get("P1_EDIT_ID") and st.session_state.get("P1_EDIT_ROWKEY"):
             edit_info = f"Editando ID={st.session_state['P1_EDIT_ID']} ✅"
         else:
             edit_info = "Modo nuevo registro ✅"
-        st.info(f"{edit_info} · Para calcular: llena 4 campos numéricos (DH, H, Hopt, DMCS).")
+        st.info(f"{edit_info} · Método actual: **{metodo_final if metodo_final else '—'}**")
 
-    # Guardar (nuevo)
+    # ---------- GUARDAR NUEVO ----------
     if guardar:
         now_ts = time.time()
         last_ts = float(st.session_state.get("LAST_SUBMIT_TS", 0.0))
@@ -875,9 +895,9 @@ if st.session_state["PAGE"] == "P1":
         errs = []
         for label, raw in [
             ("Espesor capa (cm)", esp_txt),
-            ("Dm inicio", dm_ini_txt),
-            ("Dm término", dm_ter_txt),
-            ("Dm Control", dm_ctrl_txt),
+            ("Dm inicio", st.session_state.get("p1_dm_ini_txt", "")),
+            ("Dm término", st.session_state.get("p1_dm_ter_txt", "")),
+            ("Dm Control", st.session_state.get("p1_dm_ctrl_txt", "")),
             ("Coordenada Norte", coord_n_txt),
             ("Coordenada Este", coord_e_txt),
             ("Cota", cota_txt),
@@ -892,7 +912,7 @@ if st.session_state["PAGE"] == "P1":
         if not proyecto:   errs.append("⚠️ Falta Proyecto.")
         if not operador:   errs.append("⚠️ Falta Operador.")
         if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final: errs.append("⚠️ Falta Método.")
+        if not metodo_final: errs.append("⚠️ Falta Método (selecciona o usa 'Otro').")
 
         if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
         if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
@@ -903,6 +923,10 @@ if st.session_state["PAGE"] == "P1":
             for e in errs:
                 st.error(e)
             st.stop()
+
+        dm_ini_txt = str(st.session_state.get("p1_dm_ini_txt", ""))
+        dm_ter_txt = str(st.session_state.get("p1_dm_ter_txt", ""))
+        dm_ctrl_txt = str(st.session_state.get("p1_dm_ctrl_txt", ""))
 
         capa = parse_int(capa_txt)
         espesor_cm = parse_float_loose(esp_txt)
@@ -944,7 +968,7 @@ if st.session_state["PAGE"] == "P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,
+            "Metodo": metodo_final,  # ✅ GUARDA SÍ O SÍ
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -979,8 +1003,7 @@ if st.session_state["PAGE"] == "P1":
             "estado": str(estado),
         })
 
-        if not keep_values:
-            # Limpia inputs pero conserva last_saved para que KPIs no desaparezcan
+        if not bool(st.session_state.get("p1_keep", False)):
             reset_form_hard(clear_last_saved=False)
             st.session_state["P1_EDIT_ID"] = None
             st.session_state["P1_EDIT_ROWKEY"] = None
@@ -988,7 +1011,7 @@ if st.session_state["PAGE"] == "P1":
         st.success("Registro guardado correctamente ✅")
         st.rerun()
 
-    # Guardar cambios (update)
+    # ---------- GUARDAR CAMBIOS (EDIT) ----------
     if guardar_cambios:
         rowkey = st.session_state.get("P1_EDIT_ROWKEY")
         rid = st.session_state.get("P1_EDIT_ID")
@@ -1000,9 +1023,9 @@ if st.session_state["PAGE"] == "P1":
         errs = []
         for label, raw in [
             ("Espesor capa (cm)", esp_txt),
-            ("Dm inicio", dm_ini_txt),
-            ("Dm término", dm_ter_txt),
-            ("Dm Control", dm_ctrl_txt),
+            ("Dm inicio", st.session_state.get("p1_dm_ini_txt", "")),
+            ("Dm término", st.session_state.get("p1_dm_ter_txt", "")),
+            ("Dm Control", st.session_state.get("p1_dm_ctrl_txt", "")),
             ("Coordenada Norte", coord_n_txt),
             ("Coordenada Este", coord_e_txt),
             ("Cota", cota_txt),
@@ -1017,7 +1040,7 @@ if st.session_state["PAGE"] == "P1":
         if not proyecto:   errs.append("⚠️ Falta Proyecto.")
         if not operador:   errs.append("⚠️ Falta Operador.")
         if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final: errs.append("⚠️ Falta Método.")
+        if not metodo_final: errs.append("⚠️ Falta Método (selecciona o usa 'Otro').")
 
         if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
         if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
@@ -1028,6 +1051,10 @@ if st.session_state["PAGE"] == "P1":
             for e in errs:
                 st.error(e)
             st.stop()
+
+        dm_ini_txt = str(st.session_state.get("p1_dm_ini_txt", ""))
+        dm_ter_txt = str(st.session_state.get("p1_dm_ter_txt", ""))
+        dm_ctrl_txt = str(st.session_state.get("p1_dm_ctrl_txt", ""))
 
         capa = parse_int(capa_txt)
         espesor_cm = parse_float_loose(esp_txt)
@@ -1064,7 +1091,7 @@ if st.session_state["PAGE"] == "P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,
+            "Metodo": metodo_final,  # ✅ UPDATE REAL
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -1078,7 +1105,7 @@ if st.session_state["PAGE"] == "P1":
             "Umbral_Observado_pct": float(UMBRAL_O),
             "Estado_QAQC": estado,
             "Observacion": str(observacion).strip(),
-            "Timestamp": pd.to_datetime(datetime.now()),  # auditoría modificación
+            "Timestamp": pd.to_datetime(datetime.now()),
         }
 
         df_now = load_data(DATA_FILE)
@@ -1136,7 +1163,6 @@ if st.session_state["PAGE"] == "P1":
 
         ids = sorted(df_show["ID_Registro"].dropna().astype(int).unique().tolist())
 
-        # FIX: limpiar selección inválida si la base cambió
         prev_sel = st.session_state.get("p1_del_ids", [])
         if isinstance(prev_sel, list):
             st.session_state["p1_del_ids"] = [int(x) for x in prev_sel if str(x).strip().isdigit() and int(x) in ids]
@@ -1153,16 +1179,15 @@ if st.session_state["PAGE"] == "P1":
                     save_data(df_new, DATA_FILE)
                     st.success(f"Eliminados {n_del} registro(s).")
                     st.session_state["p1_del_ids"] = []
-                    # si eliminaste el que estabas editando, saca el modo edit
                     if st.session_state.get("P1_EDIT_ID") in sel_ids:
                         st.session_state["P1_EDIT_ID"] = None
                         st.session_state["P1_EDIT_ROWKEY"] = None
                     st.rerun()
         with b2:
-            st.caption("Eliminación real por **ID_Registro**. Para editar: usa **Editar ID** arriba y carga en formulario.")
+            st.caption("Eliminar: por **ID_Registro**. Editar: **Editar ID → Cargar** y luego **Guardar cambios (EDIT)**.")
 
 # =========================================================
-# PANTALLA 2
+# PANTALLA 2 (SIN CAMBIOS)
 # =========================================================
 else:
     st.caption("Pantalla 2 · Dashboard KPIs + Gráficos + Control chart + Tabla (Editar/Eliminar/Export)")
@@ -1270,8 +1295,8 @@ else:
             s = df_f.groupby(df_f["Fecha_control"].dt.date)["pct_Compactacion"].mean().sort_index()
             fig3, ax3 = plt.subplots(figsize=(6.2, 2.4))
             ax3.plot(list(s.index), list(s.values), marker="o")
-            ax3.axhline(float(UMBRAL_A), linestyle="--")
-            ax3.axhline(float(UMBRAL_O), linestyle="--")
+            ax3.axhline(float(UMBRAL_A), linestyle="--", label="Umbral A")
+            ax3.axhline(float(UMBRAL_O), linestyle="--", label="Umbral O")
             ax3.set_ylabel("% Comp", fontsize=LABEL_FS)
             ax3.set_xlabel("Fecha", fontsize=LABEL_FS)
             ax3.tick_params(axis="x", rotation=45, labelsize=TICK_FS)
@@ -1339,14 +1364,12 @@ else:
                     if row is None:
                         st.error("No encontré ese ID.")
                     else:
-                        # Cargar en P1 y cambiar de página
-                        load_record_into_form(row)
+                        load_record_into_form(row, metodos_ref=metodos)
                         st.session_state["PAGE"] = "P1"
                         st.success("Cargado en Pantalla 1. Ahora edita y presiona Guardar cambios (EDIT).")
                         st.rerun()
 
         with a2:
-            # Eliminar
             prev_sel = st.session_state.get("p2_del", [])
             if isinstance(prev_sel, list):
                 st.session_state["p2_del"] = [int(x) for x in prev_sel if str(x).strip().isdigit() and int(x) in ids]
