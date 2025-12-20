@@ -1,10 +1,10 @@
 # =========================================================
-# Q-INTEGRITY – DENSIDADES (DEMO WEB) ✅
-# FIX CRÍTICO: "Método" no se guardaba en Streamlit Cloud
-# - Selectbox con index=None + placeholder (sin "— Seleccionar —" como opción)
-# - Validación dura: si no hay método, NO guarda
-# - Guardado robusto en Excel (carpeta /data + escritura atómica)
-# - Tabla + eliminar por ID
+# Q-INTEGRITY – DENSIDADES (DEMO WEB) ✅ FULL app.py
+# FIXES PARA STREAMLIT CLOUD (DEMO HOY):
+# 1) "Método" SIEMPRE guarda (selectbox con index=None + placeholder)
+# 2) NO revienta con StreamlitAPIException (reset seguro por FORM_VER)
+# 3) Guardado robusto en Excel en /data (escritura atómica)
+# 4) Tabla + filtros + eliminar por ID + descargar Excel
 # =========================================================
 
 import os
@@ -20,17 +20,25 @@ import streamlit as st
 st.set_page_config(page_title="Q-INTEGRITY | Densidades (DEMO)", layout="wide")
 
 # -----------------------------
-# RUTAS SEGURAS (WEB)
+# PATHS SEGUROS (WEB)
 # -----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 DATA_FILE = os.path.join(DATA_DIR, "qintegrity_densidades.xlsx")
+SHEET_NAME = "BD"
 
 # -----------------------------
-# HELPERS
+# CONSTANTES
 # -----------------------------
+METODOS = [
+    "Cono de Arena",
+    "Densímetro Nuclear",
+    "Método del Globo",
+    "Otro",
+]
+
 COLS = [
     "ID_Registro",
     "Fecha",
@@ -46,13 +54,16 @@ COLS = [
     "Creado_En",
 ]
 
+# -----------------------------
+# HELPERS
+# -----------------------------
 def safe_write_excel(df: pd.DataFrame, path: str) -> None:
-    """Escritura atómica para evitar excel corrupto / cortes."""
+    """Escritura atómica para evitar corrupción / cortes en Cloud."""
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
     os.close(tmp_fd)
     try:
         with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="BD")
+            df.to_excel(writer, index=False, sheet_name=SHEET_NAME)
         os.replace(tmp_path, path)
     finally:
         if os.path.exists(tmp_path):
@@ -61,153 +72,193 @@ def safe_write_excel(df: pd.DataFrame, path: str) -> None:
             except Exception:
                 pass
 
+
 def load_data() -> pd.DataFrame:
     if os.path.exists(DATA_FILE):
         try:
-            df = pd.read_excel(DATA_FILE, sheet_name="BD", engine="openpyxl")
+            df = pd.read_excel(DATA_FILE, sheet_name=SHEET_NAME, engine="openpyxl")
             for c in COLS:
                 if c not in df.columns:
                     df[c] = None
             df = df[COLS]
             return df
         except Exception:
-            # Si el archivo existe pero está malo, partimos limpio para no morir en demo
+            # En demo: si el archivo está malo, partimos limpio
             return pd.DataFrame(columns=COLS)
     return pd.DataFrame(columns=COLS)
 
-def calc_densidad_seca(dens_humeda: float, humedad_pct: float) -> float:
-    # D_seca = D_humeda / (1 + w)
+
+def parse_float(x, field_name: str) -> float:
+    try:
+        s = str(x).strip().replace(",", ".")
+        if s == "":
+            raise ValueError("vacío")
+        return float(s)
+    except Exception:
+        st.error(f"⚠️ **{field_name}** debe ser numérico (ej: 2.015).")
+        st.stop()
+
+
+def densidad_seca(dens_humeda: float, humedad_pct: float) -> float:
     w = humedad_pct / 100.0
     return dens_humeda / (1.0 + w)
 
-def calc_compactacion(dens_seca: float, dm_proctor: float) -> float:
+
+def compactacion_pct(dens_seca: float, dm_proctor: float) -> float:
     return (dens_seca / dm_proctor) * 100.0
 
-def must_float(x, field_name: str) -> float:
-    try:
-        v = float(str(x).replace(",", "."))
-        return v
-    except Exception:
-        st.error(f"⚠️ Campo inválido: **{field_name}**. Debe ser numérico.")
-        st.stop()
 
 # -----------------------------
-# SESSION STATE
+# SESSION STATE (RESET SEGURO)
 # -----------------------------
 if "df" not in st.session_state:
     st.session_state.df = load_data()
 
-if "form_key" not in st.session_state:
-    st.session_state.form_key = 1
+if "FORM_VER" not in st.session_state:
+    st.session_state.FORM_VER = 1
 
-def reset_form():
-    st.session_state.form_key += 1
+def reset_form_hard():
+    # ✅ Reset seguro en Cloud: NO toca keys ya creadas
+    st.session_state.FORM_VER += 1
+
 
 # -----------------------------
-# HEADER
+# UI
 # -----------------------------
 st.title("Q-INTEGRITY | Densidades – DEMO WEB")
-st.caption("Fix aplicado: el campo **Método** ahora se guarda correctamente en la web.")
+st.caption("Versión demo estable para Streamlit Cloud: guarda Método + no revienta al limpiar/guardar.")
 
-# -----------------------------
-# LAYOUT
-# -----------------------------
 left, right = st.columns([1.05, 1.6], gap="large")
 
-# =============================
-# FORMULARIO INGRESO
-# =============================
+# =========================================================
+# FORM INGRESO
+# =========================================================
 with left:
     st.subheader("Ingreso de Registro")
 
-    with st.form(key=f"form_ingreso_{st.session_state.form_key}", clear_on_submit=False):
-        fecha = st.date_input("Fecha", value=date.today())
-        proyecto = st.text_input("Proyecto", value="")
-        frente = st.text_input("Frente / Detalle", value="")
+    with st.form(key=f"FORM_INGRESO_{st.session_state.FORM_VER}", clear_on_submit=False):
+        fecha = st.date_input(
+            "Fecha",
+            value=date.today(),
+            key=f"fecha_{st.session_state.FORM_VER}",
+        )
+        proyecto = st.text_input(
+            "Proyecto",
+            value="",
+            key=f"proyecto_{st.session_state.FORM_VER}",
+        )
+        frente = st.text_input(
+            "Frente / Detalle",
+            value="",
+            key=f"frente_{st.session_state.FORM_VER}",
+        )
 
-        # ✅ FIX REAL (NO USAR "— Seleccionar —" COMO OPCIÓN)
-        METODOS = [
-            "Cono de Arena",
-            "Densímetro Nuclear",
-            "Método del Globo",
-            "Otro",
-        ]
+        # ✅ FIX: Método en web (sin "— Seleccionar —" como opción)
         metodo = st.selectbox(
             "Método",
             options=METODOS,
-            index=None,  # 🔥 CLAVE EN WEB
+            index=None,
             placeholder="Seleccionar método",
+            key=f"metodo_{st.session_state.FORM_VER}",
         )
 
         c1, c2 = st.columns(2)
         with c1:
-            dens_humeda_in = st.text_input("Densidad Húmeda", value="")
+            dens_humeda_in = st.text_input(
+                "Densidad Húmeda",
+                value="",
+                key=f"dens_humeda_{st.session_state.FORM_VER}",
+                placeholder="Ej: 2.015",
+            )
         with c2:
-            humedad_in = st.text_input("Humedad (%)", value="")
+            humedad_in = st.text_input(
+                "Humedad (%)",
+                value="",
+                key=f"humedad_{st.session_state.FORM_VER}",
+                placeholder="Ej: 8.2",
+            )
 
-        dm_proctor_in = st.text_input("DM Proctor (Densidad Máx. Seca)", value="")
-        obs = st.text_area("Observaciones", value="", height=90)
+        dm_proctor_in = st.text_input(
+            "DM Proctor (Densidad Máx. Seca)",
+            value="",
+            key=f"dm_proctor_{st.session_state.FORM_VER}",
+            placeholder="Ej: 2.120",
+        )
+
+        obs = st.text_area(
+            "Observaciones",
+            value="",
+            height=90,
+            key=f"obs_{st.session_state.FORM_VER}",
+        )
 
         b1, b2 = st.columns(2)
-        submit = b1.form_submit_button("💾 Guardar", use_container_width=True)
+        guardar = b1.form_submit_button("💾 Guardar", use_container_width=True)
         limpiar = b2.form_submit_button("🧹 Limpiar", use_container_width=True)
 
     if limpiar:
-        reset_form()
+        reset_form_hard()
         st.rerun()
 
-    if submit:
-        # VALIDACIONES DURAS
-        if not proyecto.strip():
+    if guardar:
+        # Validaciones duras
+        if not str(proyecto).strip():
             st.error("⚠️ Debe ingresar **Proyecto**.")
             st.stop()
 
         if metodo is None:
-            st.error("⚠️ Debe seleccionar un **Método** antes de guardar.")
+            st.error("⚠️ Debe seleccionar un **Método**.")
             st.stop()
 
-        dens_humeda = must_float(dens_humeda_in, "Densidad Húmeda")
-        humedad = must_float(humedad_in, "Humedad (%)")
-        dm_proctor = must_float(dm_proctor_in, "DM Proctor")
+        dens_humeda = parse_float(dens_humeda_in, "Densidad Húmeda")
+        humedad = parse_float(humedad_in, "Humedad (%)")
+        dm_proctor = parse_float(dm_proctor_in, "DM Proctor")
 
-        dens_seca = calc_densidad_seca(dens_humeda, humedad)
-        compact = calc_compactacion(dens_seca, dm_proctor)
+        d_seca = densidad_seca(dens_humeda, humedad)
+        comp = compactacion_pct(d_seca, dm_proctor)
 
-        # ID visible para demo
         now = datetime.now()
         id_reg = f"DEN-{now.strftime('%Y%m%d-%H%M%S')}"
 
         nuevo = {
             "ID_Registro": id_reg,
             "Fecha": pd.to_datetime(fecha),
-            "Proyecto": proyecto.strip(),
-            "Frente": frente.strip(),
-            "Método": metodo,  # ✅ SE GUARDA BIEN
+            "Proyecto": str(proyecto).strip(),
+            "Frente": str(frente).strip(),
+            "Método": str(metodo).strip(),
             "Densidad_Húmeda": dens_humeda,
             "Humedad": humedad,
-            "Densidad_Seca": dens_seca,
+            "Densidad_Seca": float(d_seca),
             "DM_Proctor": dm_proctor,
-            "%Compactación": compact,
-            "Observaciones": obs.strip(),
+            "%Compactación": float(comp),
+            "Observaciones": str(obs).strip(),
             "Creado_En": now,
         }
 
         st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([nuevo])], ignore_index=True)
-
-        # Guardar a Excel
         safe_write_excel(st.session_state.df, DATA_FILE)
 
         st.success("✅ Registro guardado completo (incluye Método).")
-        reset_form()
+        reset_form_hard()
         st.rerun()
 
     st.divider()
-    st.subheader("Exportación (DEMO)")
-    st.write("Excel se guarda automáticamente en `data/qintegrity_densidades.xlsx`.")
+    st.subheader("Descarga rápida (DEMO)")
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "rb") as f:
+            st.download_button(
+                "⬇️ Descargar Excel BD",
+                data=f,
+                file_name="qintegrity_densidades.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    else:
+        st.info("Aún no existe el Excel. Guarda el primer registro y aparecerá.")
 
-# =============================
-# TABLA + ELIMINAR
-# =============================
+# =========================================================
+# TABLA / KPIs / ELIMINAR
+# =========================================================
 with right:
     st.subheader("Registros Guardados")
 
@@ -221,32 +272,36 @@ with right:
         with k1:
             st.metric("Total registros", f"{len(df):,}".replace(",", "."))
         with k2:
-            st.metric("Prom. %Compactación", f"{df['%Compactación'].dropna().mean():.2f}" if df["%Compactación"].notna().any() else "—")
+            if df["%Compactación"].notna().any():
+                st.metric("Prom. %Compactación", f"{df['%Compactación'].mean():.2f}")
+            else:
+                st.metric("Prom. %Compactación", "—")
         with k3:
-            st.metric("Último registro", str(df["ID_Registro"].iloc[-1]))
+            st.metric("Último ID", str(df["ID_Registro"].iloc[-1]))
 
-        # Filtros rápidos
-        f1, f2 = st.columns(2)
+        # Filtros
+        f1, f2, f3 = st.columns([1.2, 1.0, 1.0])
         with f1:
             filtro_proy = st.text_input("Filtrar Proyecto (contiene)", value="")
         with f2:
-            filtro_metodo = st.selectbox(
+            filtro_met = st.selectbox(
                 "Filtrar Método",
                 options=["(Todos)"] + sorted(df["Método"].dropna().astype(str).unique().tolist()),
                 index=0,
             )
+        with f3:
+            orden = st.selectbox("Orden", options=["Más recientes", "Más antiguos"], index=0)
 
         view = df.copy()
         if filtro_proy.strip():
             view = view[view["Proyecto"].astype(str).str.contains(filtro_proy.strip(), case=False, na=False)]
-        if filtro_metodo != "(Todos)":
-            view = view[view["Método"].astype(str) == filtro_metodo]
+        if filtro_met != "(Todos)":
+            view = view[view["Método"].astype(str) == filtro_met]
 
-        st.dataframe(
-            view.sort_values("Creado_En", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-        )
+        asc = True if orden == "Más antiguos" else False
+        view = view.sort_values("Creado_En", ascending=asc)
+
+        st.dataframe(view, use_container_width=True, hide_index=True)
 
         st.divider()
         st.subheader("Eliminar registro (por ID_Registro)")
@@ -255,23 +310,13 @@ with right:
         if not ids:
             st.warning("No hay registros en el filtrado para eliminar.")
         else:
-            id_borrar = st.selectbox("Selecciona ID a eliminar", options=ids, index=0)
+            id_borrar = st.selectbox("Selecciona ID", options=ids, index=0)
             if st.button("🗑️ Eliminar seleccionado", use_container_width=True):
-                st.session_state.df = st.session_state.df[st.session_state.df["ID_Registro"].astype(str) != str(id_borrar)].reset_index(drop=True)
+                st.session_state.df = st.session_state.df[
+                    st.session_state.df["ID_Registro"].astype(str) != str(id_borrar)
+                ].reset_index(drop=True)
                 safe_write_excel(st.session_state.df, DATA_FILE)
                 st.success(f"✅ Eliminado: {id_borrar}")
                 st.rerun()
 
-    st.divider()
-    st.subheader("Descargar Excel (para demo)")
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "rb") as f:
-            st.download_button(
-                "⬇️ Descargar qintegrity_densidades.xlsx",
-                data=f,
-                file_name="qintegrity_densidades.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-    else:
-        st.warning("Aún no existe el Excel. Guarda el primer registro y aparecerá.")
+st.caption("DEMO WEB estable: si esto corre, el demo pasa. Luego integramos con tu módulo real.")
