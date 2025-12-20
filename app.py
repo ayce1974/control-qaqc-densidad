@@ -1,21 +1,17 @@
 # =========================================================
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2)
-# FIXES PRO (SOBRE EL PROGRAMA ORIGINAL, SIN INVENTOS):
+# FIXES PRO:
 # 1) Sector/Zona y Tramo: SOLO DIGITAR (sin listas obligatorias)
 # 2) Editar registros (P1 y P2): cargar por ID -> guardar cambios (UPDATE real)
 # 3) Recalcular: botón real (force rerun)
-# 4) Limpiar: ROBUSTO EN STREAMLIT CLOUD (NO StreamlitAPIException)
+# 4) Limpiar: robusto (siempre a la primera)
 # 5) Eliminar funciona (limpia IDs inválidos del multiselect)
 # 6) Valida numéricos: si pones letras en coords/cota/dm/etc, NO guarda
 # 7) Anti duplicado (doble click + ventana anti duplicación)
 #
-# FIX CRÍTICO DEMO WEB (EL TUYO):
-# ✅ "Método" YA NO SE PIERDE EN WEB:
-#   - NO usamos "— Seleccionar —" dentro de options (eso rompe guardado en web)
-#   - usamos selectbox con index=None + placeholder (Streamlit moderno)
-# ✅ "Limpiar" YA NO BOTA LA APP EN STREAMLIT CLOUD:
-#   - reset_form_hard() YA NO ESCRIBE keys de widgets (eso causa StreamlitAPIException)
-#   - ahora hace POP (elimina keys) + rerun -> queda limpio SIEMPRE
+# ✅ FIX ÚNICO APLICADO (REGLA DE ORO):
+# - "Método" ahora SIEMPRE carga y guarda bien en WEB:
+#   Si el método guardado NO está en la lista -> pasa a "Otro (digitar)" y rellena el texto.
 # =========================================================
 
 import os
@@ -187,21 +183,18 @@ COLUMNS = [
 def _safe_uuid() -> str:
     return str(uuid.uuid4())
 
-
 def ensure_data_file(path: str) -> None:
     if not os.path.exists(path):
         pd.DataFrame(columns=COLUMNS).to_excel(path, index=False, engine="openpyxl")
-
 
 def ensure_config_file(path: str) -> None:
     """Config solo para Métodos (sectores/tramos ya NO se usan por decisión de negocio: se digitan)."""
     if os.path.exists(path):
         return
-    metodos = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
+    metodos  = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
     df = pd.DataFrame({"Metodos": metodos})
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="Listas")
-
 
 def load_config_lists(path: str) -> Dict[str, List[str]]:
     ensure_config_file(path)
@@ -213,13 +206,11 @@ def load_config_lists(path: str) -> Dict[str, List[str]]:
     except Exception:
         return {"metodos": ["Cono de Arena", "Densímetro Nuclear"]}
 
-
 def save_config_lists(path: str, metodos: List[str]) -> None:
     metodos = [m.strip() for m in metodos if str(m).strip()]
     df = pd.DataFrame({"Metodos": metodos})
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="Listas")
-
 
 def load_lists_from_template(template_path: str) -> Dict:
     defaults = {"metodos": [], "umbral_cumple": 92.0, "umbral_obs": 90.0}
@@ -246,23 +237,15 @@ def load_lists_from_template(template_path: str) -> Dict:
             params["k"] = params["k"].astype(str).str.strip()
             for _, r in params.iterrows():
                 try:
-                    k = str(r["k"])
-                    v = float(r["v"])
-                    if "Umbral_A" in k or "UMBRAL_A" in k:
-                        umbral_cumple = v
-                    if "Umbral_O" in k or "UMBRAL_O" in k:
-                        umbral_obs = v
+                    k = str(r["k"]); v = float(r["v"])
+                    if "Umbral_A" in k or "UMBRAL_A" in k: umbral_cumple = v
+                    if "Umbral_O" in k or "UMBRAL_O" in k: umbral_obs = v
                 except Exception:
                     pass
 
-        return {
-            "metodos": metodos,
-            "umbral_cumple": float(umbral_cumple),
-            "umbral_obs": float(umbral_obs),
-        }
+        return {"metodos": metodos, "umbral_cumple": float(umbral_cumple), "umbral_obs": float(umbral_obs)}
     except Exception:
         return defaults
-
 
 def save_data(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
@@ -271,7 +254,6 @@ def save_data(df: pd.DataFrame, path: str) -> None:
             out[c] = np.nan
     out = out[COLUMNS]
     out.to_excel(path, index=False, engine="openpyxl")
-
 
 def load_data(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS)
@@ -288,24 +270,11 @@ def load_data(path: str) -> pd.DataFrame:
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
 
     num_cols = [
-        "Capa_N",
-        "Espesor_capa_cm",
-        "Dm_inicio",
-        "Dm_termino",
-        "Dm_Control",
-        "Coordenada_Norte",
-        "Coordenada_Este",
-        "Cota",
-        "Profundidad_cm",
-        "Densidad_Humeda_gcm3",
-        "Humedad_medida_pct",
-        "Humedad_Optima_pct",
-        "Delta_Humedad_pct",
-        "Densidad_Seca_gcm3",
-        "DMCS_Proctor_gcm3",
-        "pct_Compactacion",
-        "Umbral_Cumple_pct",
-        "Umbral_Observado_pct",
+        "Capa_N","Espesor_capa_cm","Dm_inicio","Dm_termino","Dm_Control",
+        "Coordenada_Norte","Coordenada_Este","Cota","Profundidad_cm",
+        "Densidad_Humeda_gcm3","Humedad_medida_pct","Humedad_Optima_pct","Delta_Humedad_pct",
+        "Densidad_Seca_gcm3","DMCS_Proctor_gcm3","pct_Compactacion",
+        "Umbral_Cumple_pct","Umbral_Observado_pct"
     ]
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -322,25 +291,20 @@ def load_data(path: str) -> pd.DataFrame:
 
     return df
 
-
 def next_id(df: pd.DataFrame) -> int:
     if df.empty or df["ID_Registro"].dropna().empty:
         return 1
     return int(df["ID_Registro"].dropna().max()) + 1
 
-
 def calc_densidad_seca(dh: float, w_pct: float) -> float:
     return float(dh) / (1.0 + float(w_pct) / 100.0)
-
 
 def calc_pct_comp(ds: float, dmcs: float) -> float:
     return (float(ds) / float(dmcs)) * 100.0 if float(dmcs) else np.nan
 
-
 def adjust_umbral_obs(umbral_a: float, umbral_o_raw: float, band: float = DEFAULT_OBS_BAND) -> float:
     o_min = max(0.0, float(umbral_a) - float(band))
     return max(float(umbral_o_raw), o_min)
-
 
 def estado_qaqc(pct: float, umbral_a: float, umbral_o: float) -> str:
     if pd.isna(pct):
@@ -350,7 +314,6 @@ def estado_qaqc(pct: float, umbral_a: float, umbral_o: float) -> str:
     if pct >= float(umbral_o):
         return "OBSERVADO"
     return "NO CUMPLE"
-
 
 def kpi_card(label: str, value: str, sub: str = ""):
     st.markdown(
@@ -364,14 +327,12 @@ def kpi_card(label: str, value: str, sub: str = ""):
         unsafe_allow_html=True,
     )
 
-
 def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         df_data.to_excel(writer, index=False, sheet_name="Datos")
         df_kpi.to_excel(writer, index=False, sheet_name="KPIs")
     return out.getvalue()
-
 
 def compute_kpis(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
     d = df_in.copy()
@@ -388,38 +349,25 @@ def compute_kpis(df_in: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
 
     pct_cumple = (a / total * 100.0) if total else 0.0
 
-    df_kpi = pd.DataFrame(
-        {
-            "Metrica": [
-                "Total_muestras",
-                "Cant_Aprobacion",
-                "Cant_Observacion",
-                "Cant_Rechazo",
-                "Pct_Cumple",
-                "Promedio_Compactacion",
-                "Max_Compactacion",
-                "Min_Compactacion",
-            ],
-            "Valor": [
-                total,
-                a,
-                o,
-                r,
-                round(pct_cumple, 2),
-                round(prom, 2) if not np.isnan(prom) else np.nan,
-                round(mx, 2) if not np.isnan(mx) else np.nan,
-                round(mn, 2) if not np.isnan(mn) else np.nan,
-            ],
-        }
-    )
+    df_kpi = pd.DataFrame({
+        "Metrica": [
+            "Total_muestras","Cant_Aprobacion","Cant_Observacion","Cant_Rechazo","Pct_Cumple",
+            "Promedio_Compactacion","Max_Compactacion","Min_Compactacion"
+        ],
+        "Valor": [
+            total, a, o, r, round(pct_cumple, 2),
+            round(prom, 2) if not np.isnan(prom) else np.nan,
+            round(mx, 2) if not np.isnan(mx) else np.nan,
+            round(mn, 2) if not np.isnan(mn) else np.nan,
+        ],
+    })
     return df_kpi, {"total": total, "a": a, "o": o, "r": r, "pct_cumple": pct_cumple, "prom": prom, "mx": mx, "mn": mn}
-
 
 def control_series_by_blocks_of_3(df_f: pd.DataFrame) -> pd.DataFrame:
     d = df_f.copy()
-    d = d.dropna(subset=["Fecha_control"]).sort_values(["Fecha_control", "Timestamp", "ID_Registro"], ascending=True)
+    d = d.dropna(subset=["Fecha_control"]).sort_values(["Fecha_control","Timestamp","ID_Registro"], ascending=True)
     if d.empty:
-        return pd.DataFrame(columns=["fecha", "block", "x_label", "pct_mean"])
+        return pd.DataFrame(columns=["fecha","block","x_label","pct_mean"])
 
     out_rows = []
     for fecha_val, g in d.groupby(d["Fecha_control"].dt.date):
@@ -431,40 +379,22 @@ def control_series_by_blocks_of_3(df_f: pd.DataFrame) -> pd.DataFrame:
         g2["block"] = (g2["idx"] // 3) + 1
         for b, gb in g2.groupby("block"):
             pct_mean = float(np.nanmean(gb["pct_Compactacion"].astype(float).values))
-            out_rows.append(
-                {
-                    "fecha": fecha_val,
-                    "block": int(b),
-                    "x_label": f"{fecha_val} (B{int(b)})",
-                    "pct_mean": pct_mean,
-                }
-            )
+            out_rows.append({"fecha": fecha_val, "block": int(b), "x_label": f"{fecha_val} (B{int(b)})", "pct_mean": pct_mean})
     return pd.DataFrame(out_rows)
 
-
 def parse_int(txt: str) -> Optional[int]:
-    if txt is None:
-        return None
+    if txt is None: return None
     s = str(txt).strip().replace(",", ".")
-    if s == "":
-        return None
-    try:
-        return int(float(s))
-    except Exception:
-        return None
-
+    if s == "": return None
+    try: return int(float(s))
+    except Exception: return None
 
 def parse_float_loose(txt: str) -> Optional[float]:
-    if txt is None:
-        return None
+    if txt is None: return None
     s = str(txt).strip().replace(",", ".")
-    if s == "":
-        return None
-    try:
-        return float(s)
-    except Exception:
-        return None
-
+    if s == "": return None
+    try: return float(s)
+    except Exception: return None
 
 def is_invalid_number_if_filled(label: str, raw: str) -> Optional[str]:
     """Si el usuario escribió algo y NO es numérico -> error"""
@@ -478,29 +408,22 @@ def is_invalid_number_if_filled(label: str, raw: str) -> Optional[str]:
         return f"⚠️ {label}: debe ser NUMÉRICO (no letras)."
     return None
 
-
 def style_table(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     def row_bg(row):
         stt = str(row.get("Estado_QAQC", "")).upper().strip()
-        if stt == "CUMPLE":
-            return ["background-color: #eef9f0"] * len(row)
-        if stt == "OBSERVADO":
-            return ["background-color: #fff7e6"] * len(row)
-        if stt == "NO CUMPLE":
-            return ["background-color: #fdeff1"] * len(row)
+        if stt == "CUMPLE": return ["background-color: #eef9f0"] * len(row)
+        if stt == "OBSERVADO": return ["background-color: #fff7e6"] * len(row)
+        if stt == "NO CUMPLE": return ["background-color: #fdeff1"] * len(row)
         return [""] * len(row)
-
     return (
-        df.style.apply(row_bg, axis=1)
-        .set_table_styles(
-            [
-                {"selector": "th", "props": "background-color:#dfe8f7; color:#0f172a; font-weight:900;"},
-                {"selector": "td", "props": "border:1px solid #d7e1f0;"},
-                {"selector": "table", "props": "border-collapse:collapse; width:100%;"},
-            ]
-        )
+        df.style
+        .apply(row_bg, axis=1)
+        .set_table_styles([
+            {"selector": "th", "props": "background-color:#dfe8f7; color:#0f172a; font-weight:900;"},
+            {"selector": "td", "props": "border:1px solid #d7e1f0;"},
+            {"selector": "table", "props": "border-collapse:collapse; width:100%;"},
+        ])
     )
-
 
 def set_last_saved(calc: Optional[Dict]):
     if calc is None:
@@ -508,58 +431,48 @@ def set_last_saved(calc: Optional[Dict]):
     else:
         st.session_state["LAST_SAVED_CALC"] = calc
 
-
 def get_last_saved() -> Optional[Dict]:
     d = st.session_state.get("LAST_SAVED_CALC", None)
     return d if isinstance(d, dict) else None
 
-
-# =========================================================
-# ✅ FIX STREAMLIT CLOUD: reset_form_hard NO toca keys de widgets
-#    (antes: st.session_state[k]=v -> StreamlitAPIException en Cloud)
-#    ahora: POP keys + (opcional) limpiar last_saved
-# =========================================================
-_FORM_KEYS_TO_CLEAR = [
-    "p1_fecha_ctrl",
-    "p1_cod_proy",
-    "p1_proyecto",
-    "p1_n_reg",
-    "p1_n_ctrl",
-    "p1_n_acta",
-    "p1_sector_txt",
-    "p1_tramo_txt",
-    "p1_frente",
-    "p1_capa_txt",
-    "p1_esp_txt",
-    "p1_dm_ini_txt",
-    "p1_dm_ter_txt",
-    "p1_dm_ctrl_txt",
-    "p1_coord_n_txt",
-    "p1_coord_e_txt",
-    "p1_cota_txt",
-    "p1_operador",
-    "p1_met_sel",
-    "p1_met_otro",
-    "p1_prof_txt",
-    "p1_obs",
-    "p1_dh_num",
-    "p1_h_num",
-    "p1_hopt_num",
-    "p1_dmcs_num",
-    "p1_del_ids",
-    "P1_EDIT_ID",
-    "P1_EDIT_ROWKEY",
-]
-
 def reset_form_hard(clear_last_saved: bool = True):
-    # ❗️NO ASIGNAR st.session_state["widget_key"]=... en Cloud (revienta)
-    # ✅ POP borra la key; el widget vuelve a su default en el siguiente rerun
-    for k in _FORM_KEYS_TO_CLEAR:
-        if k in st.session_state:
-            st.session_state.pop(k, None)
+    """Reset robusto: setea valores (no pop) + rerun externo."""
+    defaults = {
+        "p1_fecha_ctrl": date.today(),
+        "p1_cod_proy": "",
+        "p1_proyecto": "",
+        "p1_n_reg": "",
+        "p1_n_ctrl": "",
+        "p1_n_acta": "",
+        "p1_sector_txt": "",
+        "p1_tramo_txt": "",
+        "p1_frente": "",
+        "p1_capa_txt": "",
+        "p1_esp_txt": "",
+        "p1_dm_ini_txt": "",
+        "p1_dm_ter_txt": "",
+        "p1_dm_ctrl_txt": "",
+        "p1_coord_n_txt": "",
+        "p1_coord_e_txt": "",
+        "p1_cota_txt": "",
+        "p1_operador": "",
+        "p1_met_sel": "— Seleccionar —",
+        "p1_met_otro": "",
+        "p1_prof_txt": "",
+        "p1_obs": "",
+        "p1_dh_num": 0.0,
+        "p1_h_num": 0.0,
+        "p1_hopt_num": 0.0,
+        "p1_dmcs_num": 0.0,
+        "p1_del_ids": [],
+        "P1_EDIT_ID": None,
+        "P1_EDIT_ROWKEY": None,
+    }
+    for k, v in defaults.items():
+        st.session_state[k] = v
+
     if clear_last_saved:
         set_last_saved(None)
-
 
 def delete_by_ids(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[pd.DataFrame, int]:
     if df_all.empty or not ids_to_delete:
@@ -571,26 +484,24 @@ def delete_by_ids(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[pd.Da
     df_new = df_new[~df_new["ID_Registro"].isin(ids_to_delete)].copy()
     return df_new, (before - len(df_new))
 
-
 def record_signature(d: Dict) -> str:
     parts = [
-        str(d.get("Codigo_Proyecto", "")).strip(),
-        str(d.get("Proyecto", "")).strip(),
-        str(d.get("Fecha_control", "")).strip(),
-        str(d.get("Sector_Zona", "")).strip(),
-        str(d.get("Tramo", "")).strip(),
-        str(d.get("Operador", "")).strip(),
-        str(d.get("Metodo", "")).strip(),
-        str(d.get("Densidad_Humeda_gcm3", "")).strip(),
-        str(d.get("Humedad_medida_pct", "")).strip(),
-        str(d.get("Humedad_Optima_pct", "")).strip(),
-        str(d.get("DMCS_Proctor_gcm3", "")).strip(),
-        str(d.get("N_Control", "")).strip(),
-        str(d.get("N_Registro", "")).strip(),
-        str(d.get("N_Acta", "")).strip(),
+        str(d.get("Codigo_Proyecto","")).strip(),
+        str(d.get("Proyecto","")).strip(),
+        str(d.get("Fecha_control","")).strip(),
+        str(d.get("Sector_Zona","")).strip(),
+        str(d.get("Tramo","")).strip(),
+        str(d.get("Operador","")).strip(),
+        str(d.get("Metodo","")).strip(),
+        str(d.get("Densidad_Humeda_gcm3","")).strip(),
+        str(d.get("Humedad_medida_pct","")).strip(),
+        str(d.get("Humedad_Optima_pct","")).strip(),
+        str(d.get("DMCS_Proctor_gcm3","")).strip(),
+        str(d.get("N_Control","")).strip(),
+        str(d.get("N_Registro","")).strip(),
+        str(d.get("N_Acta","")).strip(),
     ]
     return "|".join(parts)
-
 
 def is_duplicate_recent(df: pd.DataFrame, sig: str, seconds: int = ANTI_DUPLICATE_WINDOW_SECONDS) -> bool:
     if df.empty or "Timestamp" not in df.columns:
@@ -598,19 +509,16 @@ def is_duplicate_recent(df: pd.DataFrame, sig: str, seconds: int = ANTI_DUPLICAT
     try:
         now = datetime.now()
         d2 = df.dropna(subset=["Timestamp"]).copy()
-        if d2.empty:
-            return False
+        if d2.empty: return False
         d2 = d2.sort_values("Timestamp", ascending=False).head(50)
         d2["__sig"] = d2.apply(lambda r: record_signature(r.to_dict()), axis=1)
         d2["__dt"] = pd.to_datetime(d2["Timestamp"], errors="coerce")
         d2 = d2.dropna(subset=["__dt"])
-        if d2.empty:
-            return False
+        if d2.empty: return False
         recent = d2[(now - d2["__dt"]).dt.total_seconds() <= float(seconds)]
         return bool((recent["__sig"] == sig).any())
     except Exception:
         return False
-
 
 def get_record_by_id(df: pd.DataFrame, rid: int) -> Optional[pd.Series]:
     if df.empty:
@@ -623,9 +531,9 @@ def get_record_by_id(df: pd.DataFrame, rid: int) -> Optional[pd.Series]:
     d = d.sort_values("Timestamp", ascending=False)
     return d.iloc[0]
 
-
+# ✅ FIX ÚNICO: Método siempre entra correcto (si no está en lista -> "Otro" + texto)
 def load_record_into_form(row: pd.Series):
-    """Carga registro en inputs P1 para editar."""
+    """Carga registro en inputs P1 para editar (FIX: Método)."""
     st.session_state["P1_EDIT_ID"] = int(row.get("ID_Registro"))
     st.session_state["P1_EDIT_ROWKEY"] = str(row.get("RowKey"))
 
@@ -653,9 +561,9 @@ def load_record_into_form(row: pd.Series):
     st.session_state["p1_operador"] = str(row.get("Operador") or "")
     st.session_state["p1_prof_txt"] = "" if pd.isna(row.get("Profundidad_cm")) else str(float(row.get("Profundidad_cm")))
 
-    # ✅ Método (FIX): ya NO usamos "— Seleccionar —" como valor real.
-    # Si el método no está en lista -> ponemos "Otro (digitar)" y llenamos p1_met_otro
+    # ---- FIX Método ----
     metodo_val = str(row.get("Metodo") or "").strip()
+    # metodos existe global (se define más abajo)
     if metodo_val and (metodo_val in metodos):
         st.session_state["p1_met_sel"] = metodo_val
         st.session_state["p1_met_otro"] = ""
@@ -663,8 +571,9 @@ def load_record_into_form(row: pd.Series):
         st.session_state["p1_met_sel"] = "Otro (digitar)"
         st.session_state["p1_met_otro"] = metodo_val
     else:
-        st.session_state["p1_met_sel"] = None
+        st.session_state["p1_met_sel"] = "— Seleccionar —"
         st.session_state["p1_met_otro"] = ""
+    # --------------------
 
     st.session_state["p1_dh_num"] = float(row.get("Densidad_Humeda_gcm3")) if pd.notna(row.get("Densidad_Humeda_gcm3")) else 0.0
     st.session_state["p1_h_num"] = float(row.get("Humedad_medida_pct")) if pd.notna(row.get("Humedad_medida_pct")) else 0.0
@@ -672,7 +581,6 @@ def load_record_into_form(row: pd.Series):
     st.session_state["p1_dmcs_num"] = float(row.get("DMCS_Proctor_gcm3")) if pd.notna(row.get("DMCS_Proctor_gcm3")) else 0.0
 
     st.session_state["p1_obs"] = str(row.get("Observacion") or "")
-
 
 def apply_update_by_rowkey(df: pd.DataFrame, rowkey: str, new_values: Dict) -> Tuple[pd.DataFrame, bool]:
     if df.empty:
@@ -685,7 +593,6 @@ def apply_update_by_rowkey(df: pd.DataFrame, rowkey: str, new_values: Dict) -> T
         if k in d.columns:
             d.loc[mask, k] = v
     return d, True
-
 
 # ---------------------------------------------------------
 # INIT
@@ -706,8 +613,7 @@ st.sidebar.markdown("### Parámetros QA/QC")
 tol_hum_opt = st.sidebar.number_input(
     "Tolerancia Humedad Óptima (±%)",
     value=float(st.session_state.get("TOL_HUM_OPT", DEFAULT_TOL_HUM_OPT)),
-    step=0.5,
-    format="%.1f",
+    step=0.5, format="%.1f"
 )
 st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
 
@@ -784,7 +690,7 @@ if st.session_state["PAGE"] == "P1":
         keep_values = st.checkbox(
             "Mantener valores después de guardar (si lo desmarcas, queda todo en blanco)",
             value=bool(st.session_state.get("p1_keep", False)),
-            key="p1_keep_chk",
+            key="p1_keep_chk"
         )
         st.session_state["p1_keep"] = bool(keep_values)
 
@@ -804,7 +710,7 @@ if st.session_state["PAGE"] == "P1":
             options=[None] + ids_all0,
             index=0,
             key="P1_EDIT_PICK",
-            help="Selecciona un ID, carga en formulario y luego guarda cambios.",
+            help="Selecciona un ID, carga en formulario y luego guarda cambios."
         )
 
     with topb5:
@@ -816,6 +722,7 @@ if st.session_state["PAGE"] == "P1":
                 st.rerun()
 
     if edit_id is not None:
+        # Botón cargar
         if st.button("✏️ Cargar ID seleccionado en formulario", use_container_width=True):
             df_temp = load_data(DATA_FILE)
             row = get_record_by_id(df_temp, int(edit_id))
@@ -839,8 +746,10 @@ if st.session_state["PAGE"] == "P1":
         n_control = st.text_input("N° Control", value=st.session_state.get("p1_n_ctrl", ""), key="p1_n_ctrl").strip()
         n_acta = st.text_input("N° Acta", value=st.session_state.get("p1_n_acta", ""), key="p1_n_acta").strip()
     with a4:
+        # ✅ DIGITAR: sin listas
         sector_final = st.text_input("Sector/Zona (DIGITAR)", value=st.session_state.get("p1_sector_txt", ""), key="p1_sector_txt").strip()
-        tramo_final = st.text_input("Tramo (DIGITAR)", value=st.session_state.get("p1_tramo_txt", ""), key="p1_tramo_txt").strip()
+        tramo_final  = st.text_input("Tramo (DIGITAR)", value=st.session_state.get("p1_tramo_txt", ""), key="p1_tramo_txt").strip()
+
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- SECCIÓN 2 ----------
@@ -848,16 +757,16 @@ if st.session_state["PAGE"] == "P1":
     b1, b2, b3, b4 = st.columns(4)
     with b1:
         capa_txt = st.text_input("N° Capa", value=st.session_state.get("p1_capa_txt", ""), placeholder="Ej: 1", key="p1_capa_txt")
-        esp_txt = st.text_input("Espesor capa (cm)", value=st.session_state.get("p1_esp_txt", ""), placeholder="Ej: 30.0", key="p1_esp_txt")
+        esp_txt  = st.text_input("Espesor capa (cm)", value=st.session_state.get("p1_esp_txt", ""), placeholder="Ej: 30.0", key="p1_esp_txt")
     with b2:
         dm_ini_txt = st.text_input("Dm inicio", value=st.session_state.get("p1_dm_ini_txt", ""), placeholder="Ej: 0", key="p1_dm_ini_txt")
         dm_ter_txt = st.text_input("Dm término", value=st.session_state.get("p1_dm_ter_txt", ""), placeholder="Ej: 100", key="p1_dm_ter_txt")
     with b3:
         dm_ctrl_txt = st.text_input("Dm Control", value=st.session_state.get("p1_dm_ctrl_txt", ""), placeholder="Ej: 50", key="p1_dm_ctrl_txt")
-        cota_txt = st.text_input("Cota", value=st.session_state.get("p1_cota_txt", ""), placeholder="Ej: 123.456", key="p1_cota_txt")
+        cota_txt    = st.text_input("Cota", value=st.session_state.get("p1_cota_txt", ""), placeholder="Ej: 123.456", key="p1_cota_txt")
     with b4:
         coord_n_txt = st.text_input("Coordenada Norte", value=st.session_state.get("p1_coord_n_txt", ""), placeholder="Ej: 6220000.000", key="p1_coord_n_txt")
-        coord_e_txt = st.text_input("Coordenada Este", value=st.session_state.get("p1_coord_e_txt", ""), placeholder="Ej: 350000.000", key="p1_coord_e_txt")
+        coord_e_txt = st.text_input("Coordenada Este",  value=st.session_state.get("p1_coord_e_txt", ""), placeholder="Ej: 350000.000", key="p1_coord_e_txt")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- SECCIÓN 3 ----------
@@ -866,62 +775,21 @@ if st.session_state["PAGE"] == "P1":
     with c1:
         operador = st.text_input("Operador (DIGITAR)", value=st.session_state.get("p1_operador", ""), key="p1_operador").strip()
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("p1_prof_txt", ""), placeholder="Ej: 20", key="p1_prof_txt")
-
     with c2:
-        # =========================================================
-        # ✅ FIX MÉTODO (DEMO WEB):
-        # - SIN "— Seleccionar —" dentro de options
-        # - index=None + placeholder (para que sea realmente vacío si no eliges)
-        # =========================================================
-        met_opts = [*metodos, "Otro (digitar)"]
-        met_sel = st.selectbox(
-            "Método",
-            options=met_opts,
-            index=None,
-            placeholder="Seleccionar método",
-            key="p1_met_sel",
-        )
+        met_opts = ["— Seleccionar —", *metodos, "Otro (digitar)"]
+        met_sel = st.selectbox("Método", met_opts, index=0, key="p1_met_sel")
         met_otro = ""
         if met_sel == "Otro (digitar)":
             met_otro = st.text_input("Método (otro)", value=st.session_state.get("p1_met_otro", ""), key="p1_met_otro")
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("p1_frente", ""), key="p1_frente").strip()
-
-    metodo_final = (met_otro.strip() if met_sel == "Otro (digitar)" else ("" if met_sel is None else str(met_sel))).strip()
+    metodo_final = (met_otro.strip() if met_sel == "Otro (digitar)" else ("" if met_sel == "— Seleccionar —" else met_sel)).strip()
 
     with c3:
-        dh_num = st.number_input(
-            "Densidad Húmeda (g/cm³)",
-            value=float(st.session_state.get("p1_dh_num", 0.0) or 0.0),
-            min_value=0.0,
-            step=0.001,
-            format="%.3f",
-            key="p1_dh_num",
-        )
-        h_num = st.number_input(
-            "Humedad medida (%)",
-            value=float(st.session_state.get("p1_h_num", 0.0) or 0.0),
-            min_value=0.0,
-            step=0.1,
-            format="%.1f",
-            key="p1_h_num",
-        )
+        dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("p1_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="p1_dh_num")
+        h_num  = st.number_input("Humedad medida (%)", value=float(st.session_state.get("p1_h_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="p1_h_num")
     with c4:
-        hopt_num = st.number_input(
-            "Humedad óptima Proctor (%)",
-            value=float(st.session_state.get("p1_hopt_num", 0.0) or 0.0),
-            min_value=0.0,
-            step=0.1,
-            format="%.1f",
-            key="p1_hopt_num",
-        )
-        dmcs_num = st.number_input(
-            "DMCS Proctor (g/cm³)",
-            value=float(st.session_state.get("p1_dmcs_num", 0.0) or 0.0),
-            min_value=0.0,
-            step=0.001,
-            format="%.3f",
-            key="p1_dmcs_num",
-        )
+        hopt_num = st.number_input("Humedad óptima Proctor (%)", value=float(st.session_state.get("p1_hopt_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="p1_hopt_num")
+        dmcs_num = st.number_input("DMCS Proctor (g/cm³)", value=float(st.session_state.get("p1_dmcs_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="p1_dmcs_num")
 
     observacion = st.text_area("Observación", value=st.session_state.get("p1_obs", ""), key="p1_obs")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -930,9 +798,9 @@ if st.session_state["PAGE"] == "P1":
     # CALC (LIVE) + FALLBACK A ÚLTIMO GUARDADO
     # ==============================
     dens_h_v = float(dh_num) if float(dh_num) > 0 else None
-    hum_v = float(h_num) if float(h_num) > 0 else None
-    hopt_v = float(hopt_num) if float(hopt_num) > 0 else None
-    dmcs_v = float(dmcs_num) if float(dmcs_num) > 0 else None
+    hum_v    = float(h_num) if float(h_num) > 0 else None
+    hopt_v   = float(hopt_num) if float(hopt_num) > 0 else None
+    dmcs_v   = float(dmcs_num) if float(dmcs_num) > 0 else None
 
     has_live = (dens_h_v is not None) and (hum_v is not None) and (hopt_v is not None) and (dmcs_v is not None) and (dmcs_v > 0)
 
@@ -957,12 +825,9 @@ if st.session_state["PAGE"] == "P1":
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
     r1, r2, r3, r4 = st.columns(4)
-    with r1:
-        kpi_card("Densidad Seca (g/cm³)", f"{dens_s_disp:.3f}" if pd.notna(dens_s_disp) else "—")
-    with r2:
-        kpi_card("% Compactación", f"{pct_disp:.1f}%" if pd.notna(pct_disp) else "—", f"A={float(UMBRAL_A):.1f}% · O={float(UMBRAL_O):.1f}%")
-    with r3:
-        kpi_card("Δ Humedad (Terreno-Proctor)", f"{delta_disp:+.2f}%" if pd.notna(delta_disp) else "—", f"Ventana ±{float(tol_hum_opt):.1f}% → {vent_disp}")
+    with r1: kpi_card("Densidad Seca (g/cm³)", f"{dens_s_disp:.3f}" if pd.notna(dens_s_disp) else "—")
+    with r2: kpi_card("% Compactación", f"{pct_disp:.1f}%" if pd.notna(pct_disp) else "—", f"A={float(UMBRAL_A):.1f}% · O={float(UMBRAL_O):.1f}%")
+    with r3: kpi_card("Δ Humedad (Terreno-Proctor)", f"{delta_disp:+.2f}%" if pd.notna(delta_disp) else "—", f"Ventana ±{float(tol_hum_opt):.1f}% → {vent_disp}")
     with r4:
         color = "#1b5e20" if estado_disp == "CUMPLE" else ("#7a4f00" if estado_disp == "OBSERVADO" else "#8a1c1c")
         st.markdown(
@@ -982,11 +847,14 @@ if st.session_state["PAGE"] == "P1":
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
+    # Botones Guardar / Guardar cambios
     left_save, mid_save, right_save = st.columns([1.3, 1.3, 3.4])
     with left_save:
         guardar = st.button("💾 Guardar registro", type="primary", use_container_width=True)
+
     with mid_save:
         guardar_cambios = st.button("💾 Guardar cambios (EDIT)", use_container_width=True)
+
     with right_save:
         edit_info = ""
         if st.session_state.get("P1_EDIT_ID") and st.session_state.get("P1_EDIT_ROWKEY"):
@@ -995,9 +863,7 @@ if st.session_state["PAGE"] == "P1":
             edit_info = "Modo nuevo registro ✅"
         st.info(f"{edit_info} · Para calcular: llena 4 campos numéricos (DH, H, Hopt, DMCS).")
 
-    # =========================================================
-    # GUARDAR (NUEVO)
-    # =========================================================
+    # Guardar (nuevo)
     if guardar:
         now_ts = time.time()
         last_ts = float(st.session_state.get("LAST_SUBMIT_TS", 0.0))
@@ -1022,25 +888,16 @@ if st.session_state["PAGE"] == "P1":
             if e:
                 errs.append(e)
 
-        if not codigo_proy:
-            errs.append("⚠️ Falta Código de Proyecto.")
-        if not proyecto:
-            errs.append("⚠️ Falta Proyecto.")
-        if not operador:
-            errs.append("⚠️ Falta Operador.")
-        if not sector_final:
-            errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final:
-            errs.append("⚠️ Falta Método.")
+        if not codigo_proy: errs.append("⚠️ Falta Código de Proyecto.")
+        if not proyecto:   errs.append("⚠️ Falta Proyecto.")
+        if not operador:   errs.append("⚠️ Falta Operador.")
+        if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
+        if not metodo_final: errs.append("⚠️ Falta Método.")
 
-        if dens_h_v is None:
-            errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
-        if dmcs_v is None or dmcs_v <= 0:
-            errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
-        if hum_v is None:
-            errs.append("⚠️ Humedad medida inválida (debe ser > 0).")
-        if hopt_v is None:
-            errs.append("⚠️ Humedad óptima inválida (debe ser > 0).")
+        if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
+        if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
+        if hum_v is None:    errs.append("⚠️ Humedad medida inválida (debe ser > 0).")
+        if hopt_v is None:   errs.append("⚠️ Humedad óptima inválida (debe ser > 0).")
 
         if errs:
             for e in errs:
@@ -1112,17 +969,15 @@ if st.session_state["PAGE"] == "P1":
         df2 = pd.concat([df_now, pd.DataFrame([nuevo])], ignore_index=True)
         save_data(df2, DATA_FILE)
 
-        set_last_saved(
-            {
-                "id": new_id,
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "dens_s": float(dens_s),
-                "pct": float(pct_comp),
-                "delta": float(delta_h),
-                "ventana": str(ventana),
-                "estado": str(estado),
-            }
-        )
+        set_last_saved({
+            "id": new_id,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "dens_s": float(dens_s),
+            "pct": float(pct_comp),
+            "delta": float(delta_h),
+            "ventana": str(ventana),
+            "estado": str(estado),
+        })
 
         if not keep_values:
             # Limpia inputs pero conserva last_saved para que KPIs no desaparezcan
@@ -1133,9 +988,7 @@ if st.session_state["PAGE"] == "P1":
         st.success("Registro guardado correctamente ✅")
         st.rerun()
 
-    # =========================================================
-    # GUARDAR CAMBIOS (UPDATE)
-    # =========================================================
+    # Guardar cambios (update)
     if guardar_cambios:
         rowkey = st.session_state.get("P1_EDIT_ROWKEY")
         rid = st.session_state.get("P1_EDIT_ID")
@@ -1160,25 +1013,16 @@ if st.session_state["PAGE"] == "P1":
             if e:
                 errs.append(e)
 
-        if not codigo_proy:
-            errs.append("⚠️ Falta Código de Proyecto.")
-        if not proyecto:
-            errs.append("⚠️ Falta Proyecto.")
-        if not operador:
-            errs.append("⚠️ Falta Operador.")
-        if not sector_final:
-            errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final:
-            errs.append("⚠️ Falta Método.")
+        if not codigo_proy: errs.append("⚠️ Falta Código de Proyecto.")
+        if not proyecto:   errs.append("⚠️ Falta Proyecto.")
+        if not operador:   errs.append("⚠️ Falta Operador.")
+        if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
+        if not metodo_final: errs.append("⚠️ Falta Método.")
 
-        if dens_h_v is None:
-            errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
-        if dmcs_v is None or dmcs_v <= 0:
-            errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
-        if hum_v is None:
-            errs.append("⚠️ Humedad medida inválida (debe ser > 0).")
-        if hopt_v is None:
-            errs.append("⚠️ Humedad óptima inválida (debe ser > 0).")
+        if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
+        if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
+        if hum_v is None:    errs.append("⚠️ Humedad medida inválida (debe ser > 0).")
+        if hopt_v is None:   errs.append("⚠️ Humedad óptima inválida (debe ser > 0).")
 
         if errs:
             for e in errs:
@@ -1234,7 +1078,7 @@ if st.session_state["PAGE"] == "P1":
             "Umbral_Observado_pct": float(UMBRAL_O),
             "Estado_QAQC": estado,
             "Observacion": str(observacion).strip(),
-            "Timestamp": pd.to_datetime(datetime.now()),
+            "Timestamp": pd.to_datetime(datetime.now()),  # auditoría modificación
         }
 
         df_now = load_data(DATA_FILE)
@@ -1245,17 +1089,15 @@ if st.session_state["PAGE"] == "P1":
 
         save_data(df_new, DATA_FILE)
 
-        set_last_saved(
-            {
-                "id": int(rid),
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "dens_s": float(dens_s),
-                "pct": float(pct_comp),
-                "delta": float(delta_h),
-                "ventana": str(ventana),
-                "estado": str(estado),
-            }
-        )
+        set_last_saved({
+            "id": int(rid),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "dens_s": float(dens_s),
+            "pct": float(pct_comp),
+            "delta": float(delta_h),
+            "ventana": str(ventana),
+            "estado": str(estado),
+        })
 
         st.success(f"Cambios guardados ✅ (ID {int(rid)})")
         st.rerun()
@@ -1294,6 +1136,7 @@ if st.session_state["PAGE"] == "P1":
 
         ids = sorted(df_show["ID_Registro"].dropna().astype(int).unique().tolist())
 
+        # FIX: limpiar selección inválida si la base cambió
         prev_sel = st.session_state.get("p1_del_ids", [])
         if isinstance(prev_sel, list):
             st.session_state["p1_del_ids"] = [int(x) for x in prev_sel if str(x).strip().isdigit() and int(x) in ids]
@@ -1310,6 +1153,7 @@ if st.session_state["PAGE"] == "P1":
                     save_data(df_new, DATA_FILE)
                     st.success(f"Eliminados {n_del} registro(s).")
                     st.session_state["p1_del_ids"] = []
+                    # si eliminaste el que estabas editando, saca el modo edit
                     if st.session_state.get("P1_EDIT_ID") in sel_ids:
                         st.session_state["P1_EDIT_ID"] = None
                         st.session_state["P1_EDIT_ROWKEY"] = None
@@ -1384,24 +1228,16 @@ else:
     df_kpi, k = compute_kpis(df_f)
 
     k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        kpi_card("Total muestras", str(k["total"]))
-    with k2:
-        kpi_card("Aprobación (A)", str(k["a"]))
-    with k3:
-        kpi_card("Observación (O)", str(k["o"]))
-    with k4:
-        kpi_card("Rechazo (R)", str(k["r"]))
+    with k1: kpi_card("Total muestras", str(k["total"]))
+    with k2: kpi_card("Aprobación (A)", str(k["a"]))
+    with k3: kpi_card("Observación (O)", str(k["o"]))
+    with k4: kpi_card("Rechazo (R)", str(k["r"]))
 
     k5, k6, k7, k8 = st.columns(4)
-    with k5:
-        kpi_card("% Cumple", f"{k['pct_cumple']:.1f}%")
-    with k6:
-        kpi_card("Promedio Compactación", f"{k['prom']:.1f}%" if not np.isnan(k["prom"]) else "—")
-    with k7:
-        kpi_card("Máx Compactación", f"{k['mx']:.1f}%" if not np.isnan(k["mx"]) else "—")
-    with k8:
-        kpi_card("Mín Compactación", f"{k['mn']:.1f}%" if not np.isnan(k["mn"]) else "—")
+    with k5: kpi_card("% Cumple", f"{k['pct_cumple']:.1f}%")
+    with k6: kpi_card("Promedio Compactación", f"{k['prom']:.1f}%" if not np.isnan(k["prom"]) else "—")
+    with k7: kpi_card("Máx Compactación", f"{k['mx']:.1f}%" if not np.isnan(k["mx"]) else "—")
+    with k8: kpi_card("Mín Compactación", f"{k['mn']:.1f}%" if not np.isnan(k["mn"]) else "—")
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
@@ -1503,12 +1339,14 @@ else:
                     if row is None:
                         st.error("No encontré ese ID.")
                     else:
+                        # Cargar en P1 y cambiar de página
                         load_record_into_form(row)
                         st.session_state["PAGE"] = "P1"
                         st.success("Cargado en Pantalla 1. Ahora edita y presiona Guardar cambios (EDIT).")
                         st.rerun()
 
         with a2:
+            # Eliminar
             prev_sel = st.session_state.get("p2_del", [])
             if isinstance(prev_sel, list):
                 st.session_state["p2_del"] = [int(x) for x in prev_sel if str(x).strip().isdigit() and int(x) in ids]
