@@ -1,13 +1,18 @@
-# # =========================================================
+# =========================================================
 # Q-INTEGRITY – APP COMPLETA (PC)
 # ✅ DENSIDADES: Pantalla 1 (Ingreso/Editar/Eliminar) + Pantalla 2 (KPIs/Dashboard/Export)
 # ✅ CONTROL PIE (m²): Módulo independiente (Ingreso/Editar/Eliminar + KPIs/Gráficos/Export)
 #
-# ✅ FIX SOLICITADO: SE ELIMINA COMPLETAMENTE EL CAMPO "MÉTODO"
-# - No se muestra en UI
-# - No se valida
-# - No se guarda
-# - Se elimina de la base al re-guardar (si venía desde Excel antiguo)
+# ✅ FIX SOLICITADO:
+# 1) SE ELIMINA COMPLETAMENTE EL CAMPO "MÉTODO"
+#    - No se muestra en UI
+#    - No se valida
+#    - No se guarda
+#    - Se elimina de la base al re-guardar (si venía desde Excel antiguo)
+#
+# 2) FIX CRÍTICO "REVIENTA AL GUARDAR":
+#    - Guardado Excel ATÓMICO + manejo de archivo abierto (WinError 32 / PermissionError)
+#    - Si el Excel está abierto, NO revienta: muestra error claro y se detiene sin botar la app
 #
 # PEGAR COMPLETO EN app.py
 # =========================================================
@@ -194,6 +199,44 @@ def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
         df_kpi.to_excel(writer, index=False, sheet_name="KPIs")
     return out.getvalue()
 
+# ---------------------------------------------------------
+# ESCRITURA SEGURA EXCEL (ANTI WinError 32 / archivo abierto)
+# ---------------------------------------------------------
+def _safe_write_excel(df: pd.DataFrame, path: str, sheet_name: str = "Datos") -> None:
+    """
+    Escribe Excel de forma segura:
+    - guarda a temp .tmp.xlsx
+    - luego reemplaza el archivo destino con os.replace()
+    Maneja el caso típico: archivo abierto en Excel (WinError 32).
+    """
+    folder = os.path.dirname(os.path.abspath(path)) or "."
+    tmp_path = os.path.join(folder, f".__tmp_{uuid.uuid4().hex}__.xlsx")
+
+    try:
+        df.to_excel(tmp_path, index=False, engine="openpyxl", sheet_name=sheet_name)
+        os.replace(tmp_path, path)
+    except PermissionError:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+        st.error(
+            "❌ No se pudo guardar porque el archivo Excel está en uso.\n\n"
+            f"Archivo: **{path}**\n\n"
+            "✅ Solución: cierra Excel (y cualquier visor) que tenga ese archivo abierto y vuelve a intentar."
+        )
+        st.stop()
+    except Exception as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        st.error(f"❌ Error inesperado al guardar: {type(e).__name__}: {e}")
+        st.stop()
+
 # =========================================================
 # =====================  DENSIDADES  ======================
 # =========================================================
@@ -237,7 +280,7 @@ COLUMNS_DEN = [
 
 def ensure_data_file_den(path: str) -> None:
     if not os.path.exists(path):
-        pd.DataFrame(columns=COLUMNS_DEN).to_excel(path, index=False, engine="openpyxl")
+        _safe_write_excel(pd.DataFrame(columns=COLUMNS_DEN), path, sheet_name="Datos")
 
 def save_data_den(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
@@ -251,7 +294,7 @@ def save_data_den(df: pd.DataFrame, path: str) -> None:
             out[c] = np.nan
 
     out = out[COLUMNS_DEN]
-    out.to_excel(path, index=False, engine="openpyxl")
+    _safe_write_excel(out, path, sheet_name="Datos")
 
 def load_data_den(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_DEN)
@@ -288,8 +331,9 @@ def load_data_den(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
+    # Detectar RowKey vacío/NA ANTES de astype(str)
+    needs_key = df["RowKey"].isna() | (df["RowKey"].astype(str).str.strip() == "") | (df["RowKey"].astype(str).str.lower() == "nan")
     df["RowKey"] = df["RowKey"].astype(str)
-    needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
         df.loc[needs_key, "RowKey"] = [_safe_uuid() for _ in range(int(needs_key.sum()))]
         save_data_den(df, path)
@@ -633,7 +677,7 @@ COLUMNS_PIE = [
 
 def ensure_data_file_pie(path: str) -> None:
     if not os.path.exists(path):
-        pd.DataFrame(columns=COLUMNS_PIE).to_excel(path, index=False, engine="openpyxl")
+        _safe_write_excel(pd.DataFrame(columns=COLUMNS_PIE), path, sheet_name="Datos")
 
 def save_data_pie(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
@@ -641,7 +685,7 @@ def save_data_pie(df: pd.DataFrame, path: str) -> None:
         if c not in out.columns:
             out[c] = np.nan
     out = out[COLUMNS_PIE]
-    out.to_excel(path, index=False, engine="openpyxl")
+    _safe_write_excel(out, path, sheet_name="Datos")
 
 def load_data_pie(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_PIE)
@@ -668,8 +712,8 @@ def load_data_pie(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
+    needs_key = df["RowKey"].isna() | (df["RowKey"].astype(str).str.strip() == "") | (df["RowKey"].astype(str).str.lower() == "nan")
     df["RowKey"] = df["RowKey"].astype(str)
-    needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
         df.loc[needs_key, "RowKey"] = [_safe_uuid() for _ in range(int(needs_key.sum()))]
         save_data_pie(df, path)
@@ -1916,3 +1960,4 @@ else:
                     st.rerun()
         with d2:
             st.caption("Eliminar: por ID. Editar: arriba (Editar ID → Cargar) y luego Guardar cambios.")
+
