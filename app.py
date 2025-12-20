@@ -1,13 +1,11 @@
 # =========================================================
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2) ✅ FINAL
-# ENTREGABLE ÚNICO (PEGAR COMPLETO EN app.py)
+# ENTREGABLE ÚNICO: REEMPLAZA TODO tu app.py por ESTE archivo completo
 #
-# ✅ CAMBIO OBLIGATORIO:
-# - ELIMINADO CAMPO "Método" DE TODOS LADOS:
-#   * Programa (Pantalla 1 y Pantalla 2)
-#   * Validaciones
-#   * Firma anti-duplicado
-#   * Base de datos / Excel (migración automática: borra columna Metodo y re-graba)
+# ✅ REGLA: "MÉTODO" ELIMINADO 100%:
+# - NO existe widget "Método" en ninguna pantalla
+# - Se purgan llaves de session_state relacionadas a método
+# - Se elimina columna Metodo / Método del Excel (migración automática)
 # =========================================================
 
 import os
@@ -28,7 +26,6 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Q-INTEGRITY | Densidades", layout="wide")
 
 DATA_FILE = "qintegrity_densidades.xlsx"
-TEMPLATE_FILE = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (solo para futuro)
 
 FIG_W = 3.2
 FIG_H = 2.2
@@ -42,6 +39,16 @@ DEFAULT_KEEP_VALUES = False
 
 ANTI_DOUBLECLICK_SECONDS = 1.2
 ANTI_DUPLICATE_WINDOW_SECONDS = 8
+
+# ---------------------------------------------------------
+# 🔥 PURGA TOTAL: SESSION_STATE (cualquier rastro de "metodo")
+# ---------------------------------------------------------
+for _k in list(st.session_state.keys()):
+    if "metodo" in _k.lower() or "método" in _k.lower():
+        try:
+            del st.session_state[_k]
+        except Exception:
+            pass
 
 # ---------------------------------------------------------
 # ESTILO UI
@@ -79,8 +86,6 @@ div[data-baseweb="datepicker"] > div{
 div[data-baseweb="input"] input{ color:#0f172a !important; font-weight:800 !important; }
 div[data-baseweb="textarea"] textarea{ color:#0f172a !important; font-weight:800 !important; }
 div[data-baseweb="select"] span{ color:#0f172a !important; font-weight:800 !important; }
-div[data-baseweb="input"] input::placeholder,
-div[data-baseweb="textarea"] textarea::placeholder{ color:#64748b !important; opacity:1 !important; }
 
 label { font-weight: 900 !important; color:#0f172a !important; }
 
@@ -190,10 +195,13 @@ def ensure_data_file(path: str) -> None:
 
 def save_data(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
+    # limpiar columnas "Metodo" / "Método" si aparecieran por error
+    for bad in ["Metodo", "Método", "metodo", "método"]:
+        if bad in out.columns:
+            out.drop(columns=[bad], inplace=True)
     for c in COLUMNS:
         if c not in out.columns:
             out[c] = np.nan
-    # ✅ eliminar cualquier columna vieja (ej: Metodo) y dejar solo COLUMNS
     out = out[COLUMNS]
     out.to_excel(path, index=False, engine="openpyxl")
 
@@ -204,12 +212,11 @@ def load_data(path: str) -> pd.DataFrame:
     rename_map = {"Observación": "Observacion", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
-    # ✅ migración: si existe columna Metodo, se elimina y se re-graba
-    had_metodo = "Metodo" in df.columns or "Método" in df.columns
-    if "Método" in df.columns and "Metodo" not in df.columns:
-        df.rename(columns={"Método": "Metodo"}, inplace=True)
-    if "Metodo" in df.columns:
-        df.drop(columns=["Metodo"], inplace=True)
+    # ✅ MIGRACIÓN: borrar Metodo / Método (cualquier variante) y regrabar
+    had_metodo = any(x in df.columns for x in ["Metodo", "Método", "metodo", "método"])
+    for bad in ["Metodo", "Método", "metodo", "método"]:
+        if bad in df.columns:
+            df.drop(columns=[bad], inplace=True)
 
     for c in COLUMNS:
         if c not in df.columns:
@@ -239,7 +246,6 @@ def load_data(path: str) -> pd.DataFrame:
     if df["ID_Registro"].notna().any():
         df.loc[df["ID_Registro"].notna(), "ID_Registro"] = df.loc[df["ID_Registro"].notna(), "ID_Registro"].astype(int)
 
-    # ✅ si migró (tenía Metodo antes), re-graba ya limpio
     if had_metodo:
         save_data(df, path)
 
@@ -394,7 +400,7 @@ def get_last_saved() -> Optional[Dict]:
     return d if isinstance(d, dict) else None
 
 # ---------------------------------------------------------
-# ✅ RESET SEGURO EN 2 PASOS (SIN Método)
+# ✅ RESET SEGURO EN 2 PASOS
 # ---------------------------------------------------------
 FORM_KEYS_DEFAULTS: Dict[str, object] = {
     "p1_fecha_ctrl": date.today(),
@@ -557,8 +563,7 @@ def apply_update_by_rowkey(df: pd.DataFrame, rowkey: str, new_values: Dict) -> T
 # INIT
 # ---------------------------------------------------------
 ensure_data_file(DATA_FILE)
-
-# ✅ aplicar reset antes de widgets
+_ = load_data(DATA_FILE)  # fuerza migración (borra Metodo si existe)
 apply_pending_form_reset_if_any()
 
 # ---------------------------------------------------------
@@ -626,7 +631,7 @@ if "p1_keep" not in st.session_state:
 # PANTALLA 1
 # =========================================================
 if st.session_state["PAGE"] == "P1":
-    st.caption("Pantalla 1 · Ingreso + Cálculos + Tabla (Ver) + Edición + Eliminación por ID + Export (Base + KPIs)")
+    st.caption("Pantalla 1 · Ingreso + Cálculos + Tabla + Edición + Eliminación + Export")
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
 
     df_all0 = load_data(DATA_FILE)
@@ -658,7 +663,6 @@ if st.session_state["PAGE"] == "P1":
             options=[None] + ids_all0,
             index=0,
             key="P1_EDIT_PICK",
-            help="Selecciona un ID, carga en formulario y luego guarda cambios."
         )
 
     with topb5:
@@ -733,7 +737,7 @@ if st.session_state["PAGE"] == "P1":
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ==============================
-    # CALC (LIVE) + FALLBACK ÚLTIMO GUARDADO
+    # CALC
     # ==============================
     dens_h_v = float(dh_num) if float(dh_num) > 0 else None
     hum_v    = float(h_num) if float(h_num) > 0 else None
@@ -791,11 +795,9 @@ if st.session_state["PAGE"] == "P1":
     with mid_save:
         guardar_cambios = st.button("💾 Guardar cambios (EDIT)", use_container_width=True)
     with right_save:
-        edit_info = ""
+        edit_info = "Modo nuevo registro ✅"
         if st.session_state.get("P1_EDIT_ID") and st.session_state.get("P1_EDIT_ROWKEY"):
             edit_info = f"Editando ID={st.session_state['P1_EDIT_ID']} ✅"
-        else:
-            edit_info = "Modo nuevo registro ✅"
         st.info(f"{edit_info} · Para calcular: llena 4 campos numéricos (DH, H, Hopt, DMCS).")
 
     # ------------------------------
@@ -928,9 +930,8 @@ if st.session_state["PAGE"] == "P1":
     if guardar_cambios:
         rowkey = st.session_state.get("P1_EDIT_ROWKEY")
         rid = st.session_state.get("P1_EDIT_ID")
-
         if not rowkey or not rid:
-            st.warning("Primero carga un ID para editar (arriba: Editar ID → Cargar).")
+            st.warning("Primero carga un ID para editar (Editar ID → Cargar).")
             st.stop()
 
         errs = []
@@ -1018,7 +1019,7 @@ if st.session_state["PAGE"] == "P1":
         df_now = load_data(DATA_FILE)
         df_new, ok = apply_update_by_rowkey(df_now, str(rowkey), update_values)
         if not ok:
-            st.error("No encontré el RowKey del registro. (Puede que se haya eliminado).")
+            st.error("No encontré el RowKey del registro (puede que se haya eliminado).")
             st.stop()
 
         save_data(df_new, DATA_FILE)
@@ -1092,7 +1093,7 @@ if st.session_state["PAGE"] == "P1":
                         st.session_state["P1_EDIT_ROWKEY"] = None
                     st.rerun()
         with b2:
-            st.caption("Eliminación real por **ID_Registro**. Para editar: usa **Editar ID** arriba y carga en formulario.")
+            st.caption("Eliminar por **ID_Registro** · Editar: usa **Editar ID** arriba y carga en formulario.")
 
 # =========================================================
 # PANTALLA 2
@@ -1308,4 +1309,4 @@ else:
             )
 
         with a4:
-            st.caption("Editar: carga el ID a Pantalla 1. Eliminar: por ID. Export: **Datos filtrados + KPIs**.")
+            st.caption("Editar: carga el ID a Pantalla 1 · Eliminar: por ID · Export: Datos filtrados + KPIs.")
