@@ -2,18 +2,11 @@
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2) ✅ FIX FINAL
 # ENTREGABLE ÚNICO (PEGAR COMPLETO EN app.py)
 #
-# FIX URGENTE:
-# - StreamlitAPIException al GUARDAR venía por resetear st.session_state
-#   (keys de widgets) DESPUÉS de que los widgets ya fueron creados.
-# - Solución: reset en 2 pasos con flag (_DO_RESET_FORM):
-#     1) marcar flag
-#     2) en el siguiente rerun, ANTES de crear widgets, aplicar defaults
-#
-# Resultado:
-# ✅ Guardar NO revienta
-# ✅ Guardar SÍ persiste en Excel
-# ✅ Tabla se actualiza correctamente
-# ✅ Limpiar funciona a la primera
+# FIX NUEVO:
+# - La tabla "no se ve" porque el texto queda BLANCO en el cuerpo del dataframe
+#   (tema/CSS de Streamlit + Styler).
+# - Solución: forzar color de texto NEGRO en gridcells + headers
+#   y en Styler (filas A/O/R).
 # =========================================================
 
 import os
@@ -95,12 +88,23 @@ div[data-testid="stDataFrame"] div[role="grid"]{
   border: 2px solid #aabbd6 !important;
   border-radius: 12px !important;
 }
+
+/* ✅ FIX: encabezado y celdas con TEXTO NEGRO */
 div[data-testid="stDataFrame"] div[role="columnheader"]{
   background: #dfe8f7 !important;
   font-weight: 900 !important;
   color:#0f172a !important;
 }
-div[data-testid="stDataFrame"] div[role="gridcell"]{ background: #ffffff !important; }
+div[data-testid="stDataFrame"] div[role="gridcell"]{
+  background: #ffffff !important;
+  color:#0f172a !important;
+  font-weight: 700 !important;
+}
+
+/* ✅ FIX: algunos temas meten color en spans internos */
+div[data-testid="stDataFrame"] div[role="gridcell"] *{
+  color:#0f172a !important;
+}
 
 .qi-chip{ display:inline-block; padding:4px 10px; border-radius:999px; font-weight:900; font-size:12px; margin-right:8px; }
 .qi-green{ background:#e7f6ea; color:#1b5e20; border:1px solid #bfe8c6; }
@@ -190,10 +194,9 @@ def ensure_data_file(path: str) -> None:
         pd.DataFrame(columns=COLUMNS).to_excel(path, index=False, engine="openpyxl")
 
 def ensure_config_file(path: str) -> None:
-    """Config solo para Métodos (sectores/tramos ya NO se usan por decisión de negocio: se digitan)."""
     if os.path.exists(path):
         return
-    metodos  = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
+    metodos = ["Cono de Arena", "Densímetro Nuclear", "Corte y Pesada", "Balón de caucho"]
     df = pd.DataFrame({"Metodos": metodos})
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         df.to_excel(w, index=False, sheet_name="Listas")
@@ -281,7 +284,6 @@ def load_data(path: str) -> pd.DataFrame:
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # RowKey robusto
     df["RowKey"] = df["RowKey"].astype(str)
     needs_key = df["RowKey"].isna() | (df["RowKey"].str.strip() == "") | (df["RowKey"].str.lower() == "nan")
     if needs_key.any():
@@ -304,7 +306,7 @@ def calc_densidad_seca(dh: float, w_pct: float) -> float:
 def calc_pct_comp(ds: float, dmcs: float) -> float:
     return (float(ds) / float(dmcs)) * 100.0 if float(dmcs) else np.nan
 
-def adjust_umbral_obs(umbral_a: float, umbral_o_raw: float, band: float = DEFAULT_OBS_BAND) -> float:
+def adjust_umbral_obs(umbral_a: float, umbral_o_raw: float, band: float = 2.0) -> float:
     o_min = max(0.0, float(umbral_a) - float(band))
     return max(float(umbral_o_raw), o_min)
 
@@ -409,19 +411,25 @@ def is_invalid_number_if_filled(label: str, raw: str) -> Optional[str]:
         return f"⚠️ {label}: debe ser NUMÉRICO (no letras)."
     return None
 
+# ✅ FIX: Styler con texto NEGRO siempre
 def style_table(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
-    def row_bg(row):
+    def row_style(row):
         stt = str(row.get("Estado_QAQC", "")).upper().strip()
-        if stt == "CUMPLE": return ["background-color: #eef9f0"] * len(row)
-        if stt == "OBSERVADO": return ["background-color: #fff7e6"] * len(row)
-        if stt == "NO CUMPLE": return ["background-color: #fdeff1"] * len(row)
-        return [""] * len(row)
+        base = "color:#0f172a; font-weight:700;"
+        if stt == "CUMPLE":
+            return [base + "background-color:#eef9f0;"] * len(row)
+        if stt == "OBSERVADO":
+            return [base + "background-color:#fff7e6;"] * len(row)
+        if stt == "NO CUMPLE":
+            return [base + "background-color:#fdeff1;"] * len(row)
+        return [base] * len(row)
+
     return (
         df.style
-        .apply(row_bg, axis=1)
+        .apply(row_style, axis=1)
         .set_table_styles([
             {"selector": "th", "props": "background-color:#dfe8f7; color:#0f172a; font-weight:900;"},
-            {"selector": "td", "props": "border:1px solid #d7e1f0;"},
+            {"selector": "td", "props": "border:1px solid #d7e1f0; color:#0f172a;"},
             {"selector": "table", "props": "border-collapse:collapse; width:100%;"},
         ])
     )
@@ -478,17 +486,14 @@ def request_form_reset(clear_last_saved: bool = True):
 def apply_pending_form_reset_if_any():
     if st.session_state.get("_DO_RESET_FORM", False):
         clear_last = bool(st.session_state.get("_RESET_CLEAR_LAST", True))
-        # IMPORTANTE: borrar keys antes de crear widgets
         for k in list(FORM_KEYS_DEFAULTS.keys()):
             if k in st.session_state:
                 try:
                     del st.session_state[k]
                 except Exception:
                     pass
-        # set defaults
         for k, v in FORM_KEYS_DEFAULTS.items():
             st.session_state[k] = v
-        # limpiar flags
         st.session_state["_DO_RESET_FORM"] = False
         st.session_state["_RESET_CLEAR_LAST"] = True
         if clear_last:
@@ -616,9 +621,7 @@ cfg = load_config_lists(CONFIG_FILE)
 
 metodos = list(dict.fromkeys([*cfg.get("metodos", []), *tpl.get("metodos", [])])) or ["Cono de Arena", "Densímetro Nuclear"]
 
-# ---------------------------------------------------------
-# ✅ APLICAR RESET PENDIENTE ANTES DE CREAR WIDGETS
-# ---------------------------------------------------------
+# ✅ aplicar reset antes de widgets
 apply_pending_form_reset_if_any()
 
 # ---------------------------------------------------------
@@ -763,7 +766,6 @@ if st.session_state["PAGE"] == "P1":
     with a4:
         sector_final = st.text_input("Sector/Zona (DIGITAR)", value=st.session_state.get("p1_sector_txt", ""), key="p1_sector_txt").strip()
         tramo_final  = st.text_input("Tramo (DIGITAR)", value=st.session_state.get("p1_tramo_txt", ""), key="p1_tramo_txt").strip()
-
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- SECCIÓN 2 ----------
@@ -874,7 +876,9 @@ if st.session_state["PAGE"] == "P1":
             edit_info = "Modo nuevo registro ✅"
         st.info(f"{edit_info} · Para calcular: llena 4 campos numéricos (DH, H, Hopt, DMCS).")
 
-    # Guardar (nuevo)
+    # ------------------------------
+    # GUARDAR NUEVO
+    # ------------------------------
     if guardar:
         now_ts = time.time()
         last_ts = float(st.session_state.get("LAST_SUBMIT_TS", 0.0))
@@ -991,7 +995,6 @@ if st.session_state["PAGE"] == "P1":
         })
 
         if not keep_values:
-            # ✅ reset seguro en siguiente run (no revienta)
             request_form_reset(clear_last_saved=False)
             st.session_state["P1_EDIT_ID"] = None
             st.session_state["P1_EDIT_ROWKEY"] = None
@@ -999,7 +1002,9 @@ if st.session_state["PAGE"] == "P1":
         st.success("Registro guardado correctamente ✅")
         st.rerun()
 
-    # Guardar cambios (update)
+    # ------------------------------
+    # GUARDAR CAMBIOS (EDIT)
+    # ------------------------------
     if guardar_cambios:
         rowkey = st.session_state.get("P1_EDIT_ROWKEY")
         rid = st.session_state.get("P1_EDIT_ID")
@@ -1385,4 +1390,3 @@ else:
 
         with a4:
             st.caption("Editar: carga el ID a Pantalla 1. Eliminar: por ID. Export: **Datos filtrados + KPIs**.")
-
