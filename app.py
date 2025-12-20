@@ -1,9 +1,10 @@
 # =========================================================
 # Q-INTEGRITY – DENSIDADES (PANTALLA 1 + PANTALLA 2)
 # ✅ FIX ÚNICO (REGLA DE ORO):
-# - MÉTODO AHORA GUARDA SIEMPRE (WEB/PC) aunque el valor NO esté en la lista.
-# - Se lee SIEMPRE desde st.session_state (no variables locales) para que no “se pierda”.
-# - Si el valor actual no está en opciones, se agrega automáticamente a las opciones.
+#   MÉTODO NO SE PIERDE NUNCA MÁS:
+#   - "Método" pasa a ser TEXTO REAL (DIGITAR) => se guarda SIEMPRE.
+#   - Se deja un selector SOLO como “sugerencia”, pero el valor final
+#     que se guarda es el del campo de texto: p1_metodo_txt.
 # =========================================================
 
 import os
@@ -444,8 +445,8 @@ def reset_form_hard(clear_last_saved: bool = True):
         "p1_coord_e_txt": "",
         "p1_cota_txt": "",
         "p1_operador": "",
-        "p1_met_sel": "— Seleccionar —",
-        "p1_met_otro": "",
+        "p1_met_sug": "—",
+        "p1_metodo_txt": "",   # ✅ ESTE ES EL QUE SE GUARDA
         "p1_prof_txt": "",
         "p1_obs": "",
         "p1_dh_num": 0.0,
@@ -518,33 +519,7 @@ def get_record_by_id(df: pd.DataFrame, rid: int) -> Optional[pd.Series]:
     d = d.sort_values("Timestamp", ascending=False)
     return d.iloc[0]
 
-# ---------------------------------------------------------
-# ✅ FIX MÉTODO: función centralizada y robusta
-# ---------------------------------------------------------
-def compute_metodo_final_from_state() -> str:
-    sel = str(st.session_state.get("p1_met_sel", "— Seleccionar —") or "").strip()
-    otro = str(st.session_state.get("p1_met_otro", "") or "").strip()
-    if sel == "Otro (digitar)":
-        return otro
-    if sel in ("— Seleccionar —", "", "None"):
-        return ""
-    return sel
-
-def ensure_metodo_option_in_list(options: List[str], current_value: str) -> List[str]:
-    cv = str(current_value or "").strip()
-    if not cv:
-        return options
-    if cv in ("— Seleccionar —", "Otro (digitar)"):
-        return options
-    if cv not in options:
-        # lo metemos antes de "Otro (digitar)" para que se pueda seleccionar y NO rompa la UI
-        if "Otro (digitar)" in options:
-            i = options.index("Otro (digitar)")
-            return options[:i] + [cv] + options[i:]
-        return options + [cv]
-    return options
-
-def load_record_into_form(row: pd.Series, metodos_ref: List[str]):
+def load_record_into_form(row: pd.Series):
     st.session_state["P1_EDIT_ID"] = int(row.get("ID_Registro"))
     st.session_state["P1_EDIT_ROWKEY"] = str(row.get("RowKey"))
 
@@ -572,17 +547,9 @@ def load_record_into_form(row: pd.Series, metodos_ref: List[str]):
     st.session_state["p1_operador"] = str(row.get("Operador") or "")
     st.session_state["p1_prof_txt"] = "" if pd.isna(row.get("Profundidad_cm")) else str(float(row.get("Profundidad_cm")))
 
-    # ✅ FIX: método cargado seguro
-    metodo_val = str(row.get("Metodo") or "").strip()
-    if metodo_val and (metodo_val in metodos_ref):
-        st.session_state["p1_met_sel"] = metodo_val
-        st.session_state["p1_met_otro"] = ""
-    elif metodo_val:
-        st.session_state["p1_met_sel"] = metodo_val  # queda como opción directa (y la agregamos a opciones)
-        st.session_state["p1_met_otro"] = ""
-    else:
-        st.session_state["p1_met_sel"] = "— Seleccionar —"
-        st.session_state["p1_met_otro"] = ""
+    # ✅ Método: SIEMPRE texto (esto es lo que se guarda)
+    st.session_state["p1_metodo_txt"] = str(row.get("Metodo") or "").strip()
+    st.session_state["p1_met_sug"] = "—"
 
     st.session_state["p1_dh_num"] = float(row.get("Densidad_Humeda_gcm3")) if pd.notna(row.get("Densidad_Humeda_gcm3")) else 0.0
     st.session_state["p1_h_num"] = float(row.get("Humedad_medida_pct")) if pd.notna(row.get("Humedad_medida_pct")) else 0.0
@@ -737,7 +704,7 @@ if st.session_state["PAGE"] == "P1":
             if row is None:
                 st.error("No encontré ese ID en la base.")
             else:
-                load_record_into_form(row, metodos_ref=metodos)
+                load_record_into_form(row)
                 st.success(f"ID {int(edit_id)} cargado. Modifica y luego presiona **Guardar cambios**.")
                 st.rerun()
 
@@ -783,29 +750,16 @@ if st.session_state["PAGE"] == "P1":
         prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("p1_prof_txt", ""), placeholder="Ej: 20", key="p1_prof_txt")
 
     with c2:
-        # ✅ FIX: opciones siempre incluyen el valor actual aunque no esté en lista
-        current_sel = str(st.session_state.get("p1_met_sel", "— Seleccionar —") or "").strip()
-        current_otro = str(st.session_state.get("p1_met_otro", "") or "").strip()
-        if current_sel == "Otro (digitar)":
-            current_value = current_otro
-        else:
-            current_value = current_sel if current_sel not in ("— Seleccionar —", "", "None") else ""
+        # ✅ FIX: método final es TEXTO REAL (esto es lo que se guarda)
+        sug_opts = ["—"] + [m for m in metodos if str(m).strip()]
+        sug = st.selectbox("Método (sugerencia)", options=sug_opts, key="p1_met_sug")
+        if sug and sug != "—":
+            st.session_state["p1_metodo_txt"] = str(sug).strip()
 
-        base_opts = ["— Seleccionar —"] + [m for m in metodos if str(m).strip()] + ["Otro (digitar)"]
-        base_opts = list(dict.fromkeys([str(x).strip() for x in base_opts if str(x).strip()]))
-        met_opts = ensure_metodo_option_in_list(base_opts, current_value)
-
-        met_sel = st.selectbox("Método", met_opts, key="p1_met_sel")
-        if str(met_sel).strip() == "Otro (digitar)":
-            st.text_input("Método (otro)", key="p1_met_otro")
-        else:
-            # si se elige un método normal, limpiar "otro" para evitar confusión
-            st.session_state["p1_met_otro"] = ""
-
+        metodo_txt = st.text_input("Método (DIGITAR)", value=st.session_state.get("p1_metodo_txt", ""), key="p1_metodo_txt").strip()
         frente = st.text_input("Frente / Detalle", value=st.session_state.get("p1_frente", ""), key="p1_frente").strip()
 
-    # ✅ FIX: método final SIEMPRE desde session_state
-    metodo_final = compute_metodo_final_from_state()
+    metodo_final = str(st.session_state.get("p1_metodo_txt", "")).strip()  # ✅ SOLO ESTO SE GUARDA
 
     with c3:
         dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("p1_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="p1_dh_num")
@@ -894,15 +848,15 @@ if st.session_state["PAGE"] == "P1":
 
         errs = []
         for label, raw in [
-            ("Espesor capa (cm)", esp_txt),
+            ("Espesor capa (cm)", st.session_state.get("p1_esp_txt", "")),
             ("Dm inicio", st.session_state.get("p1_dm_ini_txt", "")),
             ("Dm término", st.session_state.get("p1_dm_ter_txt", "")),
             ("Dm Control", st.session_state.get("p1_dm_ctrl_txt", "")),
-            ("Coordenada Norte", coord_n_txt),
-            ("Coordenada Este", coord_e_txt),
-            ("Cota", cota_txt),
-            ("Profundidad (cm)", prof_txt),
-            ("N° Capa", capa_txt),
+            ("Coordenada Norte", st.session_state.get("p1_coord_n_txt", "")),
+            ("Coordenada Este", st.session_state.get("p1_coord_e_txt", "")),
+            ("Cota", st.session_state.get("p1_cota_txt", "")),
+            ("Profundidad (cm)", st.session_state.get("p1_prof_txt", "")),
+            ("N° Capa", st.session_state.get("p1_capa_txt", "")),
         ]:
             e = is_invalid_number_if_filled(label, raw)
             if e:
@@ -912,7 +866,7 @@ if st.session_state["PAGE"] == "P1":
         if not proyecto:   errs.append("⚠️ Falta Proyecto.")
         if not operador:   errs.append("⚠️ Falta Operador.")
         if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final: errs.append("⚠️ Falta Método (selecciona o usa 'Otro').")
+        if not metodo_final: errs.append("⚠️ Falta Método (DIGITAR o usar sugerencia).")
 
         if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
         if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
@@ -924,19 +878,15 @@ if st.session_state["PAGE"] == "P1":
                 st.error(e)
             st.stop()
 
-        dm_ini_txt = str(st.session_state.get("p1_dm_ini_txt", ""))
-        dm_ter_txt = str(st.session_state.get("p1_dm_ter_txt", ""))
-        dm_ctrl_txt = str(st.session_state.get("p1_dm_ctrl_txt", ""))
-
-        capa = parse_int(capa_txt)
-        espesor_cm = parse_float_loose(esp_txt)
-        dm_ini = parse_float_loose(dm_ini_txt)
-        dm_ter = parse_float_loose(dm_ter_txt)
-        dm_control = parse_float_loose(dm_ctrl_txt)
-        cota = parse_float_loose(cota_txt)
-        coord_n = parse_float_loose(coord_n_txt)
-        coord_e = parse_float_loose(coord_e_txt)
-        prof_cm = parse_float_loose(prof_txt)
+        capa = parse_int(st.session_state.get("p1_capa_txt", ""))
+        espesor_cm = parse_float_loose(st.session_state.get("p1_esp_txt", ""))
+        dm_ini = parse_float_loose(st.session_state.get("p1_dm_ini_txt", ""))
+        dm_ter = parse_float_loose(st.session_state.get("p1_dm_ter_txt", ""))
+        dm_control = parse_float_loose(st.session_state.get("p1_dm_ctrl_txt", ""))
+        cota = parse_float_loose(st.session_state.get("p1_cota_txt", ""))
+        coord_n = parse_float_loose(st.session_state.get("p1_coord_n_txt", ""))
+        coord_e = parse_float_loose(st.session_state.get("p1_coord_e_txt", ""))
+        prof_cm = parse_float_loose(st.session_state.get("p1_prof_txt", ""))
 
         dens_s = calc_densidad_seca(float(dens_h_v), float(hum_v))
         pct_comp = calc_pct_comp(float(dens_s), float(dmcs_v))
@@ -968,7 +918,7 @@ if st.session_state["PAGE"] == "P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,  # ✅ GUARDA SÍ O SÍ
+            "Metodo": metodo_final,  # ✅ GUARDA SIEMPRE (TEXTO)
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -1022,15 +972,15 @@ if st.session_state["PAGE"] == "P1":
 
         errs = []
         for label, raw in [
-            ("Espesor capa (cm)", esp_txt),
+            ("Espesor capa (cm)", st.session_state.get("p1_esp_txt", "")),
             ("Dm inicio", st.session_state.get("p1_dm_ini_txt", "")),
             ("Dm término", st.session_state.get("p1_dm_ter_txt", "")),
             ("Dm Control", st.session_state.get("p1_dm_ctrl_txt", "")),
-            ("Coordenada Norte", coord_n_txt),
-            ("Coordenada Este", coord_e_txt),
-            ("Cota", cota_txt),
-            ("Profundidad (cm)", prof_txt),
-            ("N° Capa", capa_txt),
+            ("Coordenada Norte", st.session_state.get("p1_coord_n_txt", "")),
+            ("Coordenada Este", st.session_state.get("p1_coord_e_txt", "")),
+            ("Cota", st.session_state.get("p1_cota_txt", "")),
+            ("Profundidad (cm)", st.session_state.get("p1_prof_txt", "")),
+            ("N° Capa", st.session_state.get("p1_capa_txt", "")),
         ]:
             e = is_invalid_number_if_filled(label, raw)
             if e:
@@ -1040,7 +990,7 @@ if st.session_state["PAGE"] == "P1":
         if not proyecto:   errs.append("⚠️ Falta Proyecto.")
         if not operador:   errs.append("⚠️ Falta Operador.")
         if not sector_final: errs.append("⚠️ Falta Sector/Zona (digitado).")
-        if not metodo_final: errs.append("⚠️ Falta Método (selecciona o usa 'Otro').")
+        if not metodo_final: errs.append("⚠️ Falta Método (DIGITAR o usar sugerencia).")
 
         if dens_h_v is None: errs.append("⚠️ Densidad Húmeda inválida (debe ser > 0).")
         if dmcs_v is None or dmcs_v <= 0: errs.append("⚠️ DMCS Proctor inválido (debe ser > 0).")
@@ -1052,19 +1002,15 @@ if st.session_state["PAGE"] == "P1":
                 st.error(e)
             st.stop()
 
-        dm_ini_txt = str(st.session_state.get("p1_dm_ini_txt", ""))
-        dm_ter_txt = str(st.session_state.get("p1_dm_ter_txt", ""))
-        dm_ctrl_txt = str(st.session_state.get("p1_dm_ctrl_txt", ""))
-
-        capa = parse_int(capa_txt)
-        espesor_cm = parse_float_loose(esp_txt)
-        dm_ini = parse_float_loose(dm_ini_txt)
-        dm_ter = parse_float_loose(dm_ter_txt)
-        dm_control = parse_float_loose(dm_ctrl_txt)
-        cota = parse_float_loose(cota_txt)
-        coord_n = parse_float_loose(coord_n_txt)
-        coord_e = parse_float_loose(coord_e_txt)
-        prof_cm = parse_float_loose(prof_txt)
+        capa = parse_int(st.session_state.get("p1_capa_txt", ""))
+        espesor_cm = parse_float_loose(st.session_state.get("p1_esp_txt", ""))
+        dm_ini = parse_float_loose(st.session_state.get("p1_dm_ini_txt", ""))
+        dm_ter = parse_float_loose(st.session_state.get("p1_dm_ter_txt", ""))
+        dm_control = parse_float_loose(st.session_state.get("p1_dm_ctrl_txt", ""))
+        cota = parse_float_loose(st.session_state.get("p1_cota_txt", ""))
+        coord_n = parse_float_loose(st.session_state.get("p1_coord_n_txt", ""))
+        coord_e = parse_float_loose(st.session_state.get("p1_coord_e_txt", ""))
+        prof_cm = parse_float_loose(st.session_state.get("p1_prof_txt", ""))
 
         dens_s = calc_densidad_seca(float(dens_h_v), float(hum_v))
         pct_comp = calc_pct_comp(float(dens_s), float(dmcs_v))
@@ -1091,7 +1037,7 @@ if st.session_state["PAGE"] == "P1":
             "Coordenada_Este": float(coord_e) if coord_e is not None else np.nan,
             "Cota": float(cota) if cota is not None else np.nan,
             "Operador": operador,
-            "Metodo": metodo_final,  # ✅ UPDATE REAL
+            "Metodo": metodo_final,  # ✅ UPDATE REAL (TEXTO)
             "Profundidad_cm": float(prof_cm) if prof_cm is not None else np.nan,
             "Densidad_Humeda_gcm3": float(dens_h_v),
             "Humedad_medida_pct": float(hum_v),
@@ -1364,7 +1310,7 @@ else:
                     if row is None:
                         st.error("No encontré ese ID.")
                     else:
-                        load_record_into_form(row, metodos_ref=metodos)
+                        load_record_into_form(row)
                         st.session_state["PAGE"] = "P1"
                         st.success("Cargado en Pantalla 1. Ahora edita y presiona Guardar cambios (EDIT).")
                         st.rerun()
