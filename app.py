@@ -1,9 +1,13 @@
 # =========================================================
-# Q-INTEGRITY – APP COMPLETA (PC)
+# Q-INTEGRITY – APP COMPLETA (WEB/PC)
 # ✅ DENSIDADES: Pantalla 1 (Ingreso/Editar/Eliminar) + Pantalla 2 (KPIs/Dashboard/Export)
 # ✅ CONTROL PIE (m²): Módulo independiente (Ingreso/Editar/Eliminar + KPIs/Gráficos/Export)
 #
-# ✅ FIX DEFINITIVO: ELIMINADO CAMPO "Metodo" (NO aparece / NO se guarda / NO se valida)
+# ✅ FIX WEB + REGLA DE ORO:
+# 1) ELIMINADO campo "Metodo" COMPLETO (UI + Excel + config + validación + firma)
+# 2) Compatibilidad: si tu Excel antiguo trae columna "Metodo", se ignora sin caer
+# 3) Inicialización robusta de session_state (no valores “fantasma” al entrar)
+# 4) Evita crashes por valores no válidos en selectbox (ya no existe en densidades)
 #
 # PEGAR COMPLETO EN app.py
 # =========================================================
@@ -27,9 +31,9 @@ st.set_page_config(page_title="Q-INTEGRITY", layout="wide")
 
 # Densidades
 DATA_FILE_DEN = "qintegrity_densidades.xlsx"
-TEMPLATE_FILE_DEN = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (tu plantilla)
+TEMPLATE_FILE_DEN = "QI-DEN-PLT_FINAL_CORREGIDO_v12.xlsx"  # opcional (solo para umbrales si existe)
 
-# Control PIE (m²) – módulo independiente
+# Control PIE (m²)
 DATA_FILE_PIE = "qintegrity_control_pie_m2.xlsx"
 
 FIG_W = 3.2
@@ -127,7 +131,7 @@ with colB:
         """
     <div class="qi-topbar">
         <p class="qi-title">Q-INTEGRITY</p>
-        <p class="qi-subtitle">Densidades + Control PIE (m²) · App PC</p>
+        <p class="qi-subtitle">Densidades + Control PIE (m²) · App WEB/PC</p>
     </div>
     """,
         unsafe_allow_html=True,
@@ -194,7 +198,7 @@ def export_excel_bytes(df_data: pd.DataFrame, df_kpi: pd.DataFrame) -> bytes:
 # =========================================================
 # =====================  DENSIDADES  ======================
 # =========================================================
-# ✅ "Metodo" eliminado del modelo de datos completo
+# ✅ "Metodo" ELIMINADO COMPLETO
 COLUMNS_DEN = [
     "RowKey",
     "ID_Registro",
@@ -237,15 +241,16 @@ def ensure_data_file_den(path: str) -> None:
         pd.DataFrame(columns=COLUMNS_DEN).to_excel(path, index=False, engine="openpyxl")
 
 def load_lists_from_template_den(template_path: str) -> Dict:
-    # Mantengo umbrales por plantilla si existen
+    # Solo umbrales (si existe plantilla). Método ya no existe.
     defaults = {"umbral_cumple": 92.0, "umbral_obs": 90.0}
     if (not template_path) or (not os.path.exists(template_path)):
         return defaults
     try:
         df_l = pd.read_excel(template_path, sheet_name="Listas")
-
         umbral_cumple = defaults["umbral_cumple"]
         umbral_obs = defaults["umbral_obs"]
+
+        # Busca parámetros típicos en columnas 7 y 8 si existen
         if "Columna7" in df_l.columns and "Columna8" in df_l.columns:
             params = pd.DataFrame({"k": df_l["Columna7"], "v": df_l["Columna8"]}).dropna()
             params["k"] = params["k"].astype(str).str.strip()
@@ -260,18 +265,17 @@ def load_lists_from_template_den(template_path: str) -> Dict:
                 except Exception:
                     pass
 
-        return {
-            "umbral_cumple": float(umbral_cumple),
-            "umbral_obs": float(umbral_obs),
-        }
+        return {"umbral_cumple": float(umbral_cumple), "umbral_obs": float(umbral_obs)}
     except Exception:
         return defaults
 
 def save_data_den(df: pd.DataFrame, path: str) -> None:
     out = df.copy()
-    # Limpieza retrocompatibilidad: si venía "Metodo" de versiones viejas, se elimina
+
+    # Compatibilidad: si viene columna Metodo antigua, se ignora
     if "Metodo" in out.columns:
-        out = out.drop(columns=["Metodo"])
+        out = out.drop(columns=["Metodo"], errors="ignore")
+
     for c in COLUMNS_DEN:
         if c not in out.columns:
             out[c] = np.nan
@@ -280,12 +284,20 @@ def save_data_den(df: pd.DataFrame, path: str) -> None:
 
 def load_data_den(path: str) -> pd.DataFrame:
     df = pd.read_excel(path) if os.path.exists(path) else pd.DataFrame(columns=COLUMNS_DEN)
-    rename_map = {"Observación": "Observacion", "Fecha": "Fecha_control", "_RowKey": "RowKey"}
+
+    # Compatibilidad nombres antiguos
+    rename_map = {
+        "Observación": "Observacion",
+        "Fecha": "Fecha_control",
+        "_RowKey": "RowKey",
+        "Método": "Metodo",   # si venía antiguo
+        "Metodo": "Metodo",   # si venía antiguo
+    }
     df.rename(columns={c: rename_map.get(c, c) for c in df.columns}, inplace=True)
 
-    # Si existe "Metodo" de versiones antiguas, se ignora
+    # Si existe Metodo (antiguo), lo eliminamos para que no rompa
     if "Metodo" in df.columns:
-        df = df.drop(columns=["Metodo"])
+        df = df.drop(columns=["Metodo"], errors="ignore")
 
     for c in COLUMNS_DEN:
         if c not in df.columns:
@@ -420,7 +432,7 @@ def delete_by_ids_den(df_all: pd.DataFrame, ids_to_delete: List[int]) -> Tuple[p
     return df_new, (before - len(df_new))
 
 def record_signature_den(d: Dict) -> str:
-    # ✅ Metodo eliminado del signature para anti-duplicados
+    # ✅ Metodo eliminado de la firma
     parts = [
         str(d.get("Codigo_Proyecto","")).strip(),
         str(d.get("Proyecto","")).strip(),
@@ -812,12 +824,34 @@ def load_record_into_form_pie(row: pd.Series):
 ensure_data_file_pie(DATA_FILE_PIE)
 
 # ---------------------------------------------------------
+# INIT SESSION (evita “fantasmas” en web)
+# ---------------------------------------------------------
+if "APP_PAGE" not in st.session_state:
+    st.session_state["APP_PAGE"] = "DEN_P1"
+
+if "den_keep" not in st.session_state:
+    st.session_state["den_keep"] = bool(DEFAULT_KEEP_VALUES)
+
+if "TOL_HUM_OPT" not in st.session_state:
+    st.session_state["TOL_HUM_OPT"] = float(DEFAULT_TOL_HUM_OPT)
+
+if "UMBRAL_A" not in st.session_state:
+    st.session_state["UMBRAL_A"] = float(tpl_den.get("umbral_cumple", 92.0) or 92.0)
+if "UMBRAL_O_RAW" not in st.session_state:
+    st.session_state["UMBRAL_O_RAW"] = float(tpl_den.get("umbral_obs", 90.0) or 90.0)
+
+# Si nunca se inicializó el formulario densidades, lo dejamos limpio
+if "den_fecha_ctrl" not in st.session_state:
+    reset_form_den(clear_last_saved=True)
+
+# Si nunca se inicializó el formulario PIE, lo dejamos limpio
+if "pie_fecha" not in st.session_state:
+    reset_form_pie()
+
+# ---------------------------------------------------------
 # SIDEBAR: NAVEGACIÓN
 # ---------------------------------------------------------
 st.sidebar.markdown("### 🧭 Navegación")
-
-if "APP_PAGE" not in st.session_state:
-    st.session_state["APP_PAGE"] = "DEN_P1"
 
 b1, b2 = st.sidebar.columns(2)
 with b1:
@@ -848,13 +882,18 @@ if st.session_state["APP_PAGE"] in ["DEN_P1", "DEN_P2"]:
     )
     st.session_state["TOL_HUM_OPT"] = float(tol_hum_opt)
 
-    if "UMBRAL_A" not in st.session_state:
-        st.session_state["UMBRAL_A"] = float(tpl_den.get("umbral_cumple", 92.0) or 92.0)
-    if "UMBRAL_O_RAW" not in st.session_state:
-        st.session_state["UMBRAL_O_RAW"] = float(tpl_den.get("umbral_obs", 90.0) or 90.0)
-
-    UMBRAL_A = st.sidebar.number_input("Umbral A (CUMPLE ≥ %)", value=float(st.session_state["UMBRAL_A"]), step=0.5, format="%.1f")
-    UMBRAL_O_RAW = st.sidebar.number_input("Umbral O (OBSERVADO ≥ %)", value=float(st.session_state["UMBRAL_O_RAW"]), step=0.5, format="%.1f")
+    UMBRAL_A = st.sidebar.number_input(
+        "Umbral A (CUMPLE ≥ %)",
+        value=float(st.session_state["UMBRAL_A"]),
+        step=0.5,
+        format="%.1f",
+    )
+    UMBRAL_O_RAW = st.sidebar.number_input(
+        "Umbral O (OBSERVADO ≥ %)",
+        value=float(st.session_state["UMBRAL_O_RAW"]),
+        step=0.5,
+        format="%.1f",
+    )
     UMBRAL_O = adjust_umbral_obs(float(UMBRAL_A), float(UMBRAL_O_RAW), band=float(DEFAULT_OBS_BAND))
 
     st.session_state["UMBRAL_A"] = float(UMBRAL_A)
@@ -928,60 +967,61 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
                     st.success(f"ID {int(edit_id)} cargado. Modifica y presiona **Guardar cambios**.")
                     st.rerun()
 
-    if "den_keep" not in st.session_state:
-        st.session_state["den_keep"] = bool(DEFAULT_KEEP_VALUES)
-
     # ---------- SECCIÓN 1 ----------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Identificación y Control</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1:
-        fecha_ctrl = st.date_input("Fecha control", value=st.session_state.get("den_fecha_ctrl", date.today()), key="den_fecha_ctrl")
-        codigo_proy = st.text_input("Código de Proyecto", value=st.session_state.get("den_cod_proy", ""), key="den_cod_proy").strip()
+        fecha_ctrl = st.date_input("Fecha control", key="den_fecha_ctrl")
+        codigo_proy = st.text_input("Código de Proyecto", key="den_cod_proy").strip()
     with a2:
-        proyecto = st.text_input("Proyecto (DIGITAR)", value=st.session_state.get("den_proyecto", ""), key="den_proyecto").strip()
-        n_registro = st.text_input("N° Registro", value=st.session_state.get("den_n_reg", ""), key="den_n_reg").strip()
+        proyecto = st.text_input("Proyecto (DIGITAR)", key="den_proyecto").strip()
+        n_registro = st.text_input("N° Registro", key="den_n_reg").strip()
     with a3:
-        n_control = st.text_input("N° Control", value=st.session_state.get("den_n_ctrl", ""), key="den_n_ctrl").strip()
-        n_acta = st.text_input("N° Acta", value=st.session_state.get("den_n_acta", ""), key="den_n_acta").strip()
+        n_control = st.text_input("N° Control", key="den_n_ctrl").strip()
+        n_acta = st.text_input("N° Acta", key="den_n_acta").strip()
     with a4:
-        sector_final = st.text_input("Sector/Zona (DIGITAR)", value=st.session_state.get("den_sector_txt", ""), key="den_sector_txt").strip()
-        tramo_final = st.text_input("Tramo (DIGITAR)", value=st.session_state.get("den_tramo_txt", ""), key="den_tramo_txt").strip()
+        sector_final = st.text_input("Sector/Zona (DIGITAR)", key="den_sector_txt").strip()
+        tramo_final = st.text_input("Tramo (DIGITAR)", key="den_tramo_txt").strip()
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- SECCIÓN 2 ----------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Ubicación / Geometría</div>", unsafe_allow_html=True)
     b1, b2, b3, b4 = st.columns(4)
     with b1:
-        capa_txt = st.text_input("N° Capa", value=st.session_state.get("den_capa_txt", ""), placeholder="Ej: 1", key="den_capa_txt")
-        esp_txt = st.text_input("Espesor capa (cm)", value=st.session_state.get("den_esp_txt", ""), placeholder="Ej: 30.0", key="den_esp_txt")
+        capa_txt = st.text_input("N° Capa", placeholder="Ej: 1", key="den_capa_txt")
+        esp_txt = st.text_input("Espesor capa (cm)", placeholder="Ej: 30.0", key="den_esp_txt")
     with b2:
-        dm_ini_txt = st.text_input("Dm inicio", value=st.session_state.get("den_dm_ini_txt", ""), placeholder="Ej: 0", key="den_dm_ini_txt")
-        dm_ter_txt = st.text_input("Dm término", value=st.session_state.get("den_dm_ter_txt", ""), placeholder="Ej: 100", key="den_dm_ter_txt")
+        dm_ini_txt = st.text_input("Dm inicio", placeholder="Ej: 0", key="den_dm_ini_txt")
+        dm_ter_txt = st.text_input("Dm término", placeholder="Ej: 100", key="den_dm_ter_txt")
     with b3:
-        dm_ctrl_txt = st.text_input("Dm Control", value=st.session_state.get("den_dm_ctrl_txt", ""), placeholder="Ej: 50", key="den_dm_ctrl_txt")
-        cota_txt = st.text_input("Cota", value=st.session_state.get("den_cota_txt", ""), placeholder="Ej: 123.456", key="den_cota_txt")
+        dm_ctrl_txt = st.text_input("Dm Control", placeholder="Ej: 50", key="den_dm_ctrl_txt")
+        cota_txt = st.text_input("Cota", placeholder="Ej: 123.456", key="den_cota_txt")
     with b4:
-        coord_n_txt = st.text_input("Coordenada Norte", value=st.session_state.get("den_coord_n_txt", ""), placeholder="Ej: 6220000.000", key="den_coord_n_txt")
-        coord_e_txt = st.text_input("Coordenada Este", value=st.session_state.get("den_coord_e_txt", ""), placeholder="Ej: 350000.000", key="den_coord_e_txt")
+        coord_n_txt = st.text_input("Coordenada Norte", placeholder="Ej: 6220000.000", key="den_coord_n_txt")
+        coord_e_txt = st.text_input("Coordenada Este", placeholder="Ej: 350000.000", key="den_coord_e_txt")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- SECCIÓN 3 ----------
     st.markdown("<div class='qi-section'><div class='qi-h3'>Operación / Ensayo</div>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        operador = st.text_input("Operador (DIGITAR)", value=st.session_state.get("den_operador", ""), key="den_operador").strip()
-        prof_txt = st.text_input("Profundidad (cm)", value=st.session_state.get("den_prof_txt", ""), placeholder="Ej: 20", key="den_prof_txt")
+        operador = st.text_input("Operador (DIGITAR)", key="den_operador").strip()
+        prof_txt = st.text_input("Profundidad (cm)", placeholder="Ej: 20", key="den_prof_txt")
     with c2:
-        frente = st.text_input("Frente / Detalle", value=st.session_state.get("den_frente", ""), key="den_frente").strip()
-        st.caption("Campo **Método** eliminado ✅")
+        frente = st.text_input("Frente / Detalle", key="den_frente").strip()
+        st.markdown("<div class='qi-card qi-muted'>Campo <b>Método</b> eliminado ✅</div>", unsafe_allow_html=True)
     with c3:
-        dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("den_dh_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="den_dh_num")
-        h_num = st.number_input("Humedad medida (%)", value=float(st.session_state.get("den_h_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="den_h_num")
+        dh_num = st.number_input("Densidad Húmeda (g/cm³)", value=float(st.session_state.get("den_dh_num", 0.0)),
+                                 min_value=0.0, step=0.001, format="%.3f", key="den_dh_num")
+        h_num = st.number_input("Humedad medida (%)", value=float(st.session_state.get("den_h_num", 0.0)),
+                                min_value=0.0, step=0.1, format="%.1f", key="den_h_num")
     with c4:
-        hopt_num = st.number_input("Humedad óptima Proctor (%)", value=float(st.session_state.get("den_hopt_num", 0.0)), min_value=0.0, step=0.1, format="%.1f", key="den_hopt_num")
-        dmcs_num = st.number_input("DMCS Proctor (g/cm³)", value=float(st.session_state.get("den_dmcs_num", 0.0)), min_value=0.0, step=0.001, format="%.3f", key="den_dmcs_num")
+        hopt_num = st.number_input("Humedad óptima Proctor (%)", value=float(st.session_state.get("den_hopt_num", 0.0)),
+                                   min_value=0.0, step=0.1, format="%.1f", key="den_hopt_num")
+        dmcs_num = st.number_input("DMCS Proctor (g/cm³)", value=float(st.session_state.get("den_dmcs_num", 0.0)),
+                                   min_value=0.0, step=0.001, format="%.3f", key="den_dmcs_num")
 
-    observacion = st.text_area("Observación", value=st.session_state.get("den_obs", ""), key="den_obs")
+    observacion = st.text_area("Observación", key="den_obs")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # CALC LIVE
@@ -1364,7 +1404,7 @@ if st.session_state["APP_PAGE"] == "DEN_P1":
                         st.session_state["DEN_EDIT_ROWKEY"] = None
                     st.rerun()
         with d2:
-            st.caption("Eliminar: por **ID_Registro**. Editar: **Editar ID → Cargar** y luego **Guardar cambios**.")
+            st.caption("Editar: **Editar ID → Cargar** y luego **Guardar cambios (EDIT)**. Eliminar: por **ID_Registro**.")
 
 # -------------------------
 # DENSIDADES – PANTALLA 2
@@ -1530,7 +1570,6 @@ elif st.session_state["APP_PAGE"] == "DEN_P2":
             st.dataframe(df_view_user, use_container_width=True, height=340)
 
         a1, a2, a3, a4 = st.columns([1.2, 1.2, 1.6, 3.0])
-
         ids = sorted(df_f["ID_Registro"].dropna().astype(int).unique().tolist())
 
         with a1:
@@ -1627,23 +1666,23 @@ else:
 
     p1, p2, p3, p4 = st.columns(4)
     with p1:
-        pie_fecha = st.date_input("Fecha", value=st.session_state.get("pie_fecha", date.today()), key="pie_fecha")
-        pie_cod = st.text_input("COD_PROYECTO", value=st.session_state.get("pie_cod", ""), key="pie_cod").strip()
+        pie_fecha = st.date_input("Fecha", key="pie_fecha")
+        pie_cod = st.text_input("COD_PROYECTO", key="pie_cod").strip()
     with p2:
-        pie_sector = st.text_input("Sector_Zona (DIGITAR)", value=st.session_state.get("pie_sector", ""), key="pie_sector").strip()
-        pie_frente = st.text_input("Frente_Tramo (DIGITAR)", value=st.session_state.get("pie_frente", ""), key="pie_frente").strip()
+        pie_sector = st.text_input("Sector_Zona (DIGITAR)", key="pie_sector").strip()
+        pie_frente = st.text_input("Frente_Tramo (DIGITAR)", key="pie_frente").strip()
     with p3:
-        pie_dm_ini = st.text_input("DM_inicio", value=st.session_state.get("pie_dm_ini", ""), key="pie_dm_ini", placeholder="Ej: 500")
-        pie_dm_ter = st.text_input("DM_termino", value=st.session_state.get("pie_dm_ter", ""), key="pie_dm_ter", placeholder="Ej: 600")
+        pie_dm_ini = st.text_input("DM_inicio", key="pie_dm_ini", placeholder="Ej: 500")
+        pie_dm_ter = st.text_input("DM_termino", key="pie_dm_ter", placeholder="Ej: 600")
     with p4:
-        pie_largo = st.text_input("Largo_Tramo (m)", value=st.session_state.get("pie_largo", ""), key="pie_largo", placeholder="Si vacío, se calcula por DM")
-        pie_ancho = st.text_input("Ancho_m (m)", value=st.session_state.get("pie_ancho", ""), key="pie_ancho", placeholder="Ej: 12")
+        pie_largo = st.text_input("Largo_Tramo (m)", key="pie_largo", placeholder="Si vacío, se calcula por DM")
+        pie_ancho = st.text_input("Ancho_m (m)", key="pie_ancho", placeholder="Ej: 12")
 
     q1, q2, q3 = st.columns(3)
     with q1:
-        pie_valor = st.text_input("PIE_VALOR (m²/ensayo) – DIGITAR", value=st.session_state.get("pie_valor", ""), key="pie_valor", placeholder="Ej: 1000")
+        pie_valor = st.text_input("PIE_VALOR (m²/ensayo) – DIGITAR", key="pie_valor", placeholder="Ej: 1000")
     with q2:
-        pie_ejec = st.text_input("Ejecutadas", value=st.session_state.get("pie_ejec", ""), key="pie_ejec", placeholder="Ej: 2")
+        pie_ejec = st.text_input("Ejecutadas", key="pie_ejec", placeholder="Ej: 2")
     with q3:
         st.markdown("<div class='qi-card' style='height:100%'><b>Regla</b><br>Requeridas = CEIL(Area / PIE_VALOR)<br>% = Ejecutadas/Requeridas</div>", unsafe_allow_html=True)
 
@@ -1937,5 +1976,3 @@ else:
                     st.rerun()
         with d2:
             st.caption("Eliminar: por ID. Editar: arriba (Editar ID → Cargar) y luego Guardar cambios.")
-
-
